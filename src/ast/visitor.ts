@@ -66,6 +66,11 @@ export function visit<T>(node: FunctionDeclaration, visitor: NodeVisitor<T>): T;
 export function visit<T>(node: Declaration, visitor: NodeVisitor<T>): T;
 export function visit<T>(node: Statement, visitor: NodeVisitor<T>): T;
 export function visit<T>(node: Expression, visitor: NodeVisitor<T>): T;
+/** Catch-all for callers holding a node whose exact kind is not statically known. */
+export function visit<T>(
+  node: Program | Declaration | Statement | Expression,
+  visitor: NodeVisitor<T>,
+): T;
 export function visit<T>(
   node: Program | Declaration | Statement | Expression,
   visitor: NodeVisitor<T>,
