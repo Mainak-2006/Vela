@@ -34,14 +34,32 @@ export interface FunctionType {
 export interface ErrorType {
   readonly kind: "error";
 }
+/**
+ * A type that is compatible with every other type. Vela has no `any` in source,
+ * because giving programmers one invites exactly the holes a small teaching
+ * language should avoid. It exists only in the signatures of the built-in
+ * functions, where `tostring` genuinely does accept a number, a string, or a bool
+ * and the type system cannot express that union.
+ */
+export interface AnyType {
+  readonly kind: "any";
+}
 
-export type Type = NumberType | StringType | BoolType | VoidType | FunctionType | ErrorType;
+export type Type =
+  | NumberType
+  | StringType
+  | BoolType
+  | VoidType
+  | FunctionType
+  | ErrorType
+  | AnyType;
 
 export const numberType: NumberType = { kind: "number" };
 export const stringType: StringType = { kind: "string" };
 export const boolType: BoolType = { kind: "bool" };
 export const voidType: VoidType = { kind: "void" };
 export const errorType: ErrorType = { kind: "error" };
+export const anyType: AnyType = { kind: "any" };
 
 export function functionType(params: readonly Type[], returnType: Type): FunctionType {
   return { kind: "function", params, returnType };
@@ -65,9 +83,9 @@ export function isError(type: Type): boolean {
 }
 
 /**
- * Structural type equality. The `error` type equals itself only, so a genuine
- * mismatch involving it is still visible to `typesEqual`; the absorption happens
- * in `isAssignable`, which is what rules consult.
+ * Structural type equality. `any` and `error` are distinct from everything,
+ * including each other, so a genuine mismatch involving them stays visible here;
+ * the absorption happens in `isAssignable`, which is what rules consult.
  */
 export function typesEqual(a: Type, b: Type): boolean {
   if (a.kind !== b.kind) return false;
@@ -80,19 +98,23 @@ export function typesEqual(a: Type, b: Type): boolean {
 }
 
 /**
- * Assignability, which is equality plus the error-absorption rule. There is no
- * subtyping in Vela, so this is the only place a type relationship is decided.
+ * Assignability: equality, plus two absorptions. `error` absorbs so one mistake
+ * yields one message, and `any` absorbs because a built-in such as `tostring`
+ * really does accept any value. There is no subtyping otherwise.
  */
 export function isAssignable(target: Type, value: Type): boolean {
   if (target.kind === "error" || value.kind === "error") return true;
+  if (target.kind === "any" || value.kind === "any") return true;
   return typesEqual(target, value);
 }
 
-/** How a type is written in a diagnostic. `error` never reaches a message. */
+/** How a type is written in a diagnostic. */
 export function typeToString(type: Type): string {
   switch (type.kind) {
     case "function":
       return `fn(${type.params.map(typeToString).join(", ")}) -> ${typeToString(type.returnType)}`;
+    case "any":
+      return "any";
     case "error":
       return "<error>";
     default:

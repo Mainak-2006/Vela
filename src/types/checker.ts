@@ -53,6 +53,7 @@ import type {
   WhileStatement,
 } from "../ast/nodes.js";
 import { visit, type NodeVisitor } from "../ast/visitor.js";
+import { BUILTIN_SPECS } from "../runtime/values.js";
 import {
   boolType,
   errorType,
@@ -123,6 +124,23 @@ class Checker implements NodeVisitor<Type> {
 
   constructor(private readonly bag: DiagnosticBag) {
     this.scope = new Scope(null);
+    this.seedBuiltins();
+  }
+
+  /**
+   * Install the built-in signatures into the root scope, so `tostring(1)` and
+   * friends type-check. The signatures come from the same table the runtime uses
+   * to build the actual values, which is what keeps the two in agreement.
+   */
+  private seedBuiltins(): void {
+    for (const spec of BUILTIN_SPECS) {
+      this.scope.define({
+        name: spec.name,
+        type: functionType(spec.paramTypes, spec.returnType),
+        kind: "function",
+        location: { offset: 0, length: 0, line: 1, column: 1 },
+      });
+    }
   }
 
   checkProgram(program: Program): void {
@@ -230,21 +248,23 @@ class Checker implements NodeVisitor<Type> {
   }
 
   /**
-   * The syntactic "must end with return" rule described in the file header. Only
-   * applies to non-void functions, where falling off the end has no value.
+   * A non-void function must not be able to finish without producing a value.
+   *
+   * The test is `definitelyReturns` below, which is real (if small) flow analysis
+   * rather than a syntactic check on the last statement. An `if`/`else` chain
+   * whose arms all return is the single most common shape of a non-void function
+   * in a C-like language, so a purely syntactic rule would reject most
+   * well-written programs.
    */
   private requireTerminatingReturn(node: FunctionDeclaration): void {
     const returnType = primitiveType(node.returnType);
     if (returnType.kind === "void") return;
-    const last = node.body.declarations[node.body.declarations.length - 1];
-    const endsWithReturn = last !== undefined && last.kind === "return";
-    if (!endsWithReturn) {
-      this.bag.add(
-        `a function returning '${node.returnType}' must end with a return statement`,
-        node.body.location,
-        [`the body of '${node.name}' can finish without producing a '${node.returnType}'`],
-      );
-    }
+    if (definitelyReturnsBlock(node.body)) return;
+    this.bag.add(
+      `a function returning '${node.returnType}' must end with a return statement`,
+      node.body.location,
+      [`the body of '${node.name}' can finish without producing a '${node.returnType}'`],
+    );
   }
 
   // --------------------------------------------------------------- statements
@@ -558,6 +578,54 @@ class Checker implements NodeVisitor<Type> {
   letDecl(_node: Declaration): Type {
     return errorType;
   }
+}
+
+/**
+ * Whether a statement is guaranteed to transfer control out of the function,
+ * either by returning or by not finishing.
+ *
+ * This is deliberately a small, sound, and incomplete analysis. Soundness matters
+ * most: it must never claim a function returns when it might not, or the
+ * interpreter would be asked for a value that was never produced. Incompleteness
+ * only ever costs a superfluous `return` at the end of a function.
+ *
+ * In particular, loops are treated as *not* returning, even `while (true) {...}`,
+ * because proving that needs `break` analysis, and getting it wrong would be
+ * unsound. The same reasoning rules out short-circuit expressions as the final
+ * statement, since `return` is a statement in Vela and cannot appear inside one.
+ */
+function definitelyReturns(declaration: Declaration | Statement): boolean {
+  switch (declaration.kind) {
+    case "return":
+      return true;
+
+    case "block": {
+      const last = declaration.declarations[declaration.declarations.length - 1];
+      return last !== undefined && definitelyReturns(last);
+    }
+
+    case "if": {
+      // Both arms must return, and an `if` with no `else` can fall through.
+      if (declaration.elseBranch === null) return false;
+      return definitelyReturns(declaration.thenBranch) && definitelyReturns(declaration.elseBranch);
+    }
+
+    // A loop may run zero times, so it never counts as returning.
+    case "while":
+    case "for":
+    case "letDecl":
+    case "fnDecl":
+    case "print":
+    case "expressionStmt":
+    case "break":
+    case "continue":
+      return false;
+  }
+}
+
+function definitelyReturnsBlock(block: Block): boolean {
+  const last = block.declarations[block.declarations.length - 1];
+  return last !== undefined && definitelyReturns(last);
 }
 
 /** Predicate reused by the checker's numeric operator rules. */

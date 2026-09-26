@@ -122,6 +122,23 @@ describe("checker: accepted programs", () => {
   it("accepts calling a function declared earlier", () => {
     expectOk("fn f(a: number): number { return a; }\nlet x: number = f(1);");
   });
+
+  it("knows the built-in functions", () => {
+    expectOk('let s: string = tostring(1);\nlet n: number = tonumber("2");\nlet t: string = typeOf(true);');
+  });
+
+  it("gives the built-ins their declared return types", () => {
+    expectError("let n: number = tostring(1);", /cannot initialise 'n' of type 'number' with a value of type 'string'/);
+  });
+
+  it("accepts any value for a polymorphic built-in parameter", () => {
+    expectOk('print(tostring("a"));\nprint(tostring(1));\nprint(tostring(true));');
+  });
+
+  it("still checks built-in arity", () => {
+    expectError("tostring();", /expected 1 argument but got 0/);
+    expectError("tostring(1, 2);", /expected 1 argument but got 2/);
+  });
 });
 
 describe("checker: name resolution", () => {
@@ -183,6 +200,42 @@ describe("checker: declarations", () => {
 
   it("accepts a non-void function that ends with return", () => {
     expectOk("fn f(): number { print(1);\nreturn 0; }");
+  });
+
+  it("accepts an if/else where both arms return", () => {
+    expectOk("fn f(n: number): number { if (n < 0) { return 0 - n; } else { return n; } }");
+  });
+
+  it("accepts an if/else-if chain where every arm returns", () => {
+    expectOk(`
+      fn classify(n: number): string {
+        if (n < 0) { return "negative"; }
+        else if (n == 0) { return "zero"; }
+        else { return "positive"; }
+      }
+    `);
+  });
+
+  it("rejects an if with no else, even when the body returns", () => {
+    expectError("fn f(n: number): number { if (n > 0) { return 1; } }", /must end with a return statement/);
+  });
+
+  it("rejects an if/else where only one arm returns", () => {
+    expectError(
+      "fn f(n: number): number { if (n > 0) { return 1; } else { print(0); } }",
+      /must end with a return statement/,
+    );
+  });
+
+  it("does not count a loop as returning, even an infinite one", () => {
+    expectError("fn f(n: number): number { while (true) { return 1; } }", /must end with a return statement/);
+  });
+
+  it("does not count a conditional return inside a loop as returning", () => {
+    expectError(
+      "fn f(n: number): number { for (let i: number = 0; i < n; i = i + 1) { if (i == 2) { return i; } } }",
+      /must end with a return statement/,
+    );
   });
 
   it("rejects a return value of the wrong type", () => {
