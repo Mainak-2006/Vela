@@ -1,0 +1,30 @@
+{
+  "name": "vela",
+  "version": "0.1.0",
+  "description": "Vela — a small statically-typed language and its compiler (lexer, parser, type checker, tree-walking interpreter).",
+  "type": "module",
+  "bin": {
+    "vela": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/cli.ts repl",
+    "vela": "tsx src/cli.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "check-examples": "tsx src/cli.ts check examples/*.vela",
+    "run-examples": "tsx src/cli.ts run examples/hello.vela"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
