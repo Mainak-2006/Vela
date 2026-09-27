@@ -1,0 +1,67 @@
+name: Publish to VS Code Marketplace (Entra)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: >-
+          identity = print the Marketplace identity ID to paste into publisher
+          members; publish = publish the current version
+        type: choice
+        default: identity
+        options:
+          - identity
+          - publish
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vscode-publish-entra
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Azure login as the user-assigned managed identity
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+          enable-AzPSSession: true
+
+      - name: Resolve Marketplace identity ID
+        if: inputs.mode == 'identity'
+        run: |
+          az rest \
+            -u https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --output json > profile.json
+          cat profile.json
+          echo "::notice title=Marketplace identity ID::$(jq -r '.id' profile.json)"
+
+      - name: Resolve Marketplace identity ID
+        if: inputs.mode == 'publish'
+        run: |
+          az rest \
+            -u https://app.vssps.visualstudio.com/_apis/profile/profiles/me \
+            --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+            --output json > profile.json
+          echo "::notice title=Publishing as::$(jq -r '.displayName' profile.json) ($(jq -r '.id' profile.json))"
+
+      - name: Publish
+        if: inputs.mode == 'publish'
+        working-directory: editors/vscode
+        run: npx @vscode/vsce@4 publish --azure-credential
