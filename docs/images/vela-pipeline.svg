@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 341 284" width="341" height="284"
+     role="img" aria-labelledby="vela-pipeline-title vela-pipeline-desc">
+  <title id="vela-pipeline-title">The Vela compiler pipeline</title>
+  <desc id="vela-pipeline-desc">Source text flows into four stages in order. Lexer produces
+    Token[] from src/lexer/. Parser produces an AST from src/parser/. Checker produces a typed
+    AST from src/types/. Interpreter produces output from src/runtime/.</desc>
+  <style>
+    .wire  { fill: none; stroke: #0f766e; stroke-width: 1.5; }
+    .head  { fill: #0f766e; }
+    .stage { fill: #1c1917; font-size: 17px; }
+    .res   { fill: #1c1917; font-size: 17px; }
+    .meta  { fill: #78716c; font-size: 14px; }
+    @media (prefers-color-scheme: dark) {
+      .wire  { stroke: #2dd4bf; }
+      .head  { fill: #2dd4bf; }
+      .stage { fill: #f5f5f4; }
+      .res   { fill: #f5f5f4; }
+      .meta  { fill: #a8a29e; }
+    }
+    .stage, .res, .meta {
+      font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+                   "Liberation Mono", monospace;
+    }
+  </style>
+
+  <g>
+    <!-- Flow arrows sit in a left gutter so they can never run into the stage
+         text, whatever the font metrics of the reader's platform turn out to be. -->
+    <text class="meta" x="38" y="27">source text</text>
+    <path class="wire" d="M22 35 V60"/>
+    <path class="head" d="M22 66 L16 60 L28 60 Z"/>
+
+    <!-- Lexer -->
+    <text class="stage" x="38" y="77">Lexer</text>
+    <path class="wire" d="M162 72 H200"/>
+    <path class="head" d="M208 72 L200 67 L200 77 Z"/>
+    <text class="res" x="222" y="77">Token[]</text>
+    <text class="meta" x="38" y="97">src/lexer/</text>
+    <text class="meta" x="158" y="97">text &#8594; tokens</text>
+
+    <path class="wire" d="M22 106 V124"/>
+    <path class="head" d="M22 130 L16 124 L28 124 Z"/>
+
+    <!-- Parser -->
+    <text class="stage" x="38" y="133">Parser</text>
+    <path class="wire" d="M162 128 H200"/>
+    <path class="head" d="M208 128 L200 123 L200 133 Z"/>
+    <text class="res" x="222" y="133">AST</text>
+    <text class="meta" x="38" y="153">src/parser/</text>
+    <text class="meta" x="158" y="153">tokens &#8594; tree</text>
+
+    <path class="wire" d="M22 162 V180"/>
+    <path class="head" d="M22 186 L16 180 L28 180 Z"/>
+
+    <!-- Checker -->
+    <text class="stage" x="38" y="189">Checker</text>
+    <path class="wire" d="M162 184 H200"/>
+    <path class="head" d="M208 184 L200 179 L200 189 Z"/>
+    <text class="res" x="222" y="189">typed AST</text>
+    <text class="meta" x="38" y="209">src/types/</text>
+    <text class="meta" x="158" y="209">tree &#8594; tree + errors</text>
+
+    <path class="wire" d="M22 218 V236"/>
+    <path class="head" d="M22 242 L16 236 L28 236 Z"/>
+
+    <!-- Interpreter -->
+    <text class="stage" x="38" y="245">Interpreter</text>
+    <path class="wire" d="M162 240 H200"/>
+    <path class="head" d="M208 240 L200 235 L200 245 Z"/>
+    <text class="res" x="222" y="245">output</text>
+    <text class="meta" x="38" y="265">src/runtime/</text>
+    <text class="meta" x="158" y="265">tree &#8594; effects</text>
+  </g>
+</svg>

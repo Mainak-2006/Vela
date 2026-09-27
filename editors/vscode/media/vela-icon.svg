@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="5 4.5 80 80" width="80" height="80"
+     role="img" aria-label="Vela">
+  <path fill="#1c1917" d="M18 14 L45 64 L72 14 L61 14 L45 43.6 L29 14 Z"/>
+  <rect fill="#0f766e" x="10" y="70" width="70" height="5" rx="2.5"/>
+</svg>

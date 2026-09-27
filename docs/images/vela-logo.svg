@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="2 6 222 76" width="222" height="76"
+     role="img" aria-labelledby="vela-logo-title vela-logo-desc">
+  <title id="vela-logo-title">Vela</title>
+  <desc id="vela-logo-desc">Vela, a small statically-typed language. A V-shaped ribbon resting on a waterline.</desc>
+  <style>
+    .ink    { fill: #1c1917; }
+    .accent { fill: #0f766e; }
+    @media (prefers-color-scheme: dark) {
+      .ink    { fill: #f5f5f4; }
+      .accent { fill: #2dd4bf; }
+    }
+    .word {
+      font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+                   "Liberation Mono", monospace;
+      font-size: 38px;
+      letter-spacing: 2px;
+    }
+  </style>
+
+  <!-- Mark: a V-ribbon reading as both the initial and a keel, on a waterline.
+       The inner edges run parallel to the outer ones, so the arms keep an even
+       weight all the way down to the apex. -->
+  <path class="ink" d="M18 14 L45 64 L72 14 L61 14 L45 43.6 L29 14 Z"/>
+  <rect class="accent" x="10" y="70" width="70" height="3" rx="1.5"/>
+
+  <text class="word ink" x="168" y="51.6" text-anchor="middle">Vela</text>
+</svg>

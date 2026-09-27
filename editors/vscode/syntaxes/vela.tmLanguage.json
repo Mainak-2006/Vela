@@ -1,0 +1,122 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Vela",
+  "scopeName": "source.vela",
+  "fileTypes": [
+    "vela"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#constants"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#calls"
+    },
+    {
+      "include": "#identifiers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.vela",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.vela",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.vela",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.vela",
+          "match": "\\\\(?:u\\{[0-9a-fA-F]{1,6}\\}|.)"
+        }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.vela",
+      "match": "\\b\\d[\\d_]*(?:\\.[\\d_]+)?(?:[eE][+-]?[\\d_]+)?"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "storage.type.vela",
+          "match": "\\b(?:let|fn)\\b"
+        },
+        {
+          "name": "keyword.control.vela",
+          "match": "\\b(?:return|if|else|while|for|break|continue)\\b"
+        },
+        {
+          "name": "support.function.builtin.vela",
+          "match": "\\bprint\\b"
+        }
+      ]
+    },
+    "types": {
+      "name": "support.type.vela",
+      "match": "\\b(?:number|string|bool|void)\\b"
+    },
+    "constants": {
+      "name": "constant.language.vela",
+      "match": "\\b(?:true|false)\\b"
+    },
+    "operators": {
+      "name": "keyword.operator.vela",
+      "match": "==|!=|<=|>=|&&|\\|\\||[+\\-*/%!<>]|="
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.definition.begin.vela",
+          "match": "[({]"
+        },
+        {
+          "name": "punctuation.definition.end.vela",
+          "match": "[)}]"
+        },
+        {
+          "name": "punctuation.separator.vela",
+          "match": "[,;:]"
+        }
+      ]
+    },
+    "calls": {
+      "name": "entity.name.function.vela",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+    },
+    "identifiers": {
+      "name": "variable.other.vela",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    }
+  }
+}

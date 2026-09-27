@@ -1,0 +1,119 @@
+{
+  "name": "vela-language",
+  "displayName": "Vela",
+  "description": "Language support for Vela: syntax highlighting, bracket matching, and file icons for .vela files.",
+  "version": "0.1.0",
+  "publisher": "Mainak-2006",
+  "license": "MIT",
+  "author": {
+    "name": "Mainak Kundu",
+    "email": "mainakkundu13@gmail.com",
+    "url": "https://github.com/Mainak-2006"
+  },
+  "homepage": "https://github.com/Mainak-2006/Vela#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mainak-2006/Vela.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/Mainak-2006/Vela/issues"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "vela",
+    "compiler",
+    "interpreter",
+    "statically-typed",
+    "language"
+  ],
+  "icon": "media/vela-128.png",
+  "galleryBanner": {
+    "color": "#0f766e",
+    "theme": "dark"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "vela",
+        "aliases": [
+          "Vela",
+          "vela"
+        ],
+        "extensions": [
+          ".vela"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "media/vela-icon.svg",
+          "dark": "media/vela-icon-dark.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vela",
+        "scopeName": "source.vela",
+        "path": "./syntaxes/vela.tmLanguage.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[vela]": {
+        "comments": {
+          "lineComment": "//",
+          "blockComment": [
+            "/*",
+            "*/"
+          ]
+        },
+        "brackets": [
+          [
+            "{",
+            "}"
+          ],
+          [
+            "(",
+            ")"
+          ]
+        ],
+        "autoClosingPairs": [
+          {
+            "open": "{",
+            "close": "}"
+          },
+          {
+            "open": "(",
+            "close": ")"
+          },
+          {
+            "open": "\"",
+            "close": "\"",
+            "notIn": [
+              "string"
+            ]
+          }
+        ],
+        "surroundingPairs": [
+          [
+            "{",
+            "}"
+          ],
+          [
+            "(",
+            ")"
+          ],
+          [
+            "\"",
+            "\""
+          ]
+        ],
+        "wordPattern": "[A-Za-z_][A-Za-z0-9_]*"
+      }
+    }
+  }
+}

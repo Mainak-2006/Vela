@@ -1,5 +1,7 @@
 # Vela
 
+<img src="docs/images/vela-logo.svg" alt="Vela" width="444" height="152">
+
 A small statically-typed language and its compiler, written in TypeScript.
 
 Vela exists to be read. Every stage of the pipeline — lexer, parser, type
@@ -7,6 +9,11 @@ checker, interpreter — is a separate module with no back-references to the
 stages before it, and the whole thing is about 4,400 lines of TypeScript. If you
 want to understand how a compiler fits together, reading this one end to end is
 a reasonable way to spend an afternoon.
+
+<img src="docs/images/vela-pipeline.svg" alt="The Vela compiler pipeline: source text flows into the Lexer, which produces Token[]; the Parser produces an AST; the Checker produces a typed AST; the Interpreter produces output." width="341" height="284">
+
+<details>
+<summary>As text</summary>
 
 ```
 source text
@@ -23,6 +30,8 @@ Checker ──────▶ typed AST        src/types/       tree  →  tree 
    ▼
 Interpreter ──▶ output           src/runtime/     tree  →  effects
 ```
+
+</details>
 
 Each stage appends to a shared `DiagnosticBag` and the pipeline stops after the
 first stage that reported errors, because there is no point type-checking a tree
@@ -228,6 +237,7 @@ grammar — if it guesses wrong, a blank line ends the entry.
 | `src/index.ts` | The public API, for embedding the compiler in something else. |
 | `examples/` | Programs that are type-checked and run by `npm run check-examples`. `examples/invalid/` holds programs that are meant to fail, and is skipped by that scan. |
 | `docs/grammar.md` | The full grammar, from lexical structure to static rules. |
+| `docs/images/` | The wordmark and the pipeline diagram, as SVG. |
 | `test/` | 279 tests across the lexer, parser, checker, interpreter, pipeline, and CLI. |
 
 ## Design notes
