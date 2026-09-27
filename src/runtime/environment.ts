@@ -62,6 +62,15 @@ export class Environment {
     return this.get(name) !== undefined;
   }
 
+  /**
+   * Remove every binding in this scope. Used by the REPL's `.reset`. Child scopes
+   * are unaffected, so this is only meaningful on a global scope.
+   */
+  clear(): void {
+    this.values.clear();
+    this.names.length = 0;
+  }
+
   /** The scope that binds `name`, or null. Useful for tracing. */
   findScope(name: string): Environment | null {
     for (let scope: Environment | null = this; scope; scope = scope.parent) {

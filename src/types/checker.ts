@@ -110,9 +110,16 @@ export class Scope {
   }
 }
 
-/** Type-check `program`, appending any problems to `bag`. */
-export function check(program: Program, bag: DiagnosticBag): void {
-  new Checker(bag).checkProgram(program);
+/**
+ * Type-check `program`, reporting problems to `bag`.
+ *
+ * `known` seeds the root scope with names that already exist. The REPL passes the
+ * bindings accumulated from earlier entries here, so that a line referencing a
+ * variable defined in a previous line still resolves. Nothing in a source file
+ * ever needs this.
+ */
+export function check(program: Program, bag: DiagnosticBag, known: readonly Symbol[] = []): void {
+  new Checker(bag, known).checkProgram(program);
 }
 
 class Checker implements NodeVisitor<Type> {
@@ -122,8 +129,12 @@ class Checker implements NodeVisitor<Type> {
   /** Innermost function declaration, for naming the function in messages. */
   private currentFunction: string | null = null;
 
-  constructor(private readonly bag: DiagnosticBag) {
+  constructor(
+    private readonly bag: DiagnosticBag,
+    known: readonly Symbol[],
+  ) {
     this.scope = new Scope(null);
+    for (const symbol of known) this.scope.define(symbol);
     this.seedBuiltins();
   }
 

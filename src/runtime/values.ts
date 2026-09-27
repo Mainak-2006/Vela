@@ -212,6 +212,16 @@ export const BUILTIN_SPECS: readonly BuiltinSpec[] = [
       return string(target ? target.kind : "void");
     },
   },
+  {
+    name: "len",
+    arity: 1,
+    paramTypes: [stringType],
+    returnType: numberType,
+    call: (args) => {
+      const target = args[0];
+      return number(target && target.kind === "string" ? target.value.length : 0);
+    },
+  },
 ];
 
 /** The `NativeValue`s installed in a fresh global scope. */
