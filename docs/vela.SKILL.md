@@ -3,8 +3,6 @@ name: vela
 description: Write, fix, and debug Vela (`.vela`) programs. Use whenever the user mentions Vela, a .vela file, or the vela CLI, and when creating, editing, reviewing, or debugging Vela source. Covers the four primitive types (number, string, bool, void), the mandatory type annotations, the constructs Vela deliberately lacks (no arrays, no indexing, no ++, no ternary, no truthiness, no coercion, no function values, no modules, no string ordering), the four built-ins, and the recipes that replace the missing math and string library.
 license: MIT
 compatibility: opencode, Claude Code, Cursor, Copilot, Gemini CLI, Zed, Roo Code, Kilo Code, Aider
-metadata:
-  version: 0.1.1
 ---
 
 # Vela

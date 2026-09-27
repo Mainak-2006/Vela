@@ -285,7 +285,7 @@ function installSkillCommand(args: readonly string[]): number {
     console.log(skillUsage(all));
     console.log("");
     for (const target of all) {
-      const state = drift(target, source.meta.version);
+      const state = drift(target, source.version);
       const detected = isAvailable(target) ? "detected" : "-";
       console.log(
         `  ${target.id.padEnd(15)} ${target.scope.padEnd(8)} ${detected.padEnd(9)} ${state.padEnd(9)} ${target.path}`,
@@ -304,7 +304,7 @@ function installSkillCommand(args: readonly string[]): number {
   const warnings = warningsFor(targets, detectEnvironment());
 
   const verb = options.uninstall ? "Uninstalling" : options.dryRun ? "Would install" : "Installing";
-  console.log(`${verb} the vela skill (v${source.meta.version}, ${source.lineCount} lines)\n`);
+  console.log(`${verb} the vela skill (v${source.version}, ${source.lineCount} lines)\n`);
   console.log(formatReport(outcomes, warnings));
 
   const notes = outcomes.filter((o) => o.status === "hinted" || o.status === "skipped");
