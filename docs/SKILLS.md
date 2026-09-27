@@ -8,6 +8,10 @@ the compiler internals.
 it is organised by task, states the traps explicitly, and every example's output
 was executed against the current compiler before being written down.
 
+`docs/vela.SKILL.md` is the condensed version, and `vela install-skill` puts it
+into a coding assistant for you. See
+[Installing this guide into an assistant](#installing-this-guide-into-an-assistant).
+
 **Authority.** `src/parser/parser.ts` and `src/types/checker.ts` are the
 authority on the language. Where this document and the implementation disagree,
 the implementation is right and this document is a bug. Where this document
@@ -1346,6 +1350,7 @@ error: cannot initialise 'n' of type 'number' with a value of type 'string'
 | `vela tokens <file>` | Print the lexer's token stream |
 | `vela ast <file>` | Print the parser's tree as an S-expression |
 | `vela repl` | Interactive prompt |
+| `vela install-skill` | Install the Vela skill into a coding assistant |
 | `vela --help` | Usage |
 
 Exit status is `0` on success and `1` if any stage reported an error. Add
@@ -1353,6 +1358,44 @@ Exit status is `0` on success and `1` if any stage reported an error. Add
 
 Without installing: `npx vela-lang run file.vela`, or from a clone
 `npm run vela -- run file.vela`.
+
+### Installing this guide into an assistant
+
+`vela install-skill` copies `docs/vela.SKILL.md` into wherever a coding assistant
+looks for instructions, rewriting the one placeholder that needs a
+machine-specific answer: the absolute path of this file.
+
+```
+$ vela install-skill --list      # what was detected, and what is installed
+$ vela install-skill             # install for everything detected
+$ vela install-skill --uninstall
+```
+
+Targets, by id: `agents`, `claude`, `opencode`, `claude-md`, `cursor`, `copilot`,
+`claude-rules`, `agents-project`, `gemini`, `aider`. Flags: `--target <id>`
+(repeatable), `--scope user|project|both`, `--dry-run`, `--force`, `--uninstall`,
+`--list`. Exit status is `0` unless a target conflicted with a file Vela did not
+write.
+
+**Why it does not install this file.** This document is 59 KB, and every
+instruction-loading mechanism has a limit below that: Codex caps a project doc at
+32 KiB, Devin at 12,000 characters, the Agent Skills specification asks for a
+body under 500 lines, and Claude Code targets under 200 lines per `CLAUDE.md`.
+So `docs/vela.SKILL.md` is the loadable artifact — roughly 350 lines carrying the
+five rules, the does-not-exist table, the built-ins, the semantic traps, and the
+short recipes — and it points here for the diagnostic catalogue, the worked
+examples, and the compiler internals.
+
+Three details are deliberate. The full reference is named by **absolute path**
+rather than imported, because a relative link is not a lazy load and a markdown
+`@import` of a file outside the project raises an approval prompt on every start.
+`AGENTS.md` is installed as plain markdown with no frontmatter, because YAML
+frontmatter is not a format it reads. And every installed file carries a
+`vela-skill-install` marker, which is what lets `--uninstall` remove exactly what
+it wrote and leave the user's own files alone.
+
+Aider has no auto-discovery, so that target reports the `read:` line to add rather
+than rewriting the user's YAML.
 
 ### Token dump
 

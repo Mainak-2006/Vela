@@ -43,7 +43,7 @@ function vela(...args: string[]): Run {
 test("vela --help exits 0 and lists every command", () => {
   const { status, stdout } = vela("--help");
   assert.equal(status, 0);
-  for (const command of ["run", "check", "tokens", "ast", "repl"]) {
+  for (const command of ["run", "check", "tokens", "ast", "repl", "install-skill"]) {
     assert.match(stdout, new RegExp(`vela ${command}`), `help should mention '${command}'`);
   }
 });

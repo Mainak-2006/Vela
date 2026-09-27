@@ -151,6 +151,7 @@ $ npm run vela -- --help
 | `vela tokens <file>` | Print the lexer's token stream. |
 | `vela ast <file>` | Print the parser's tree as an S-expression. |
 | `vela repl` | Interactive prompt. |
+| `vela install-skill` | Add the Vela skill to your coding assistant. See [AI assistants](#ai-assistants). |
 
 Exit status is `0` on success and `1` if any stage reported an error, so these
 commands compose in a shell script or a `Makefile`.
@@ -175,6 +176,59 @@ $ npm run vela -- ast examples/hello.vela
   )
 )
 ```
+
+## AI assistants
+
+Vela is unusual enough that a model will guess wrong about it — a language with
+no arrays looks like a language where arrays are spelled differently. So the
+repository ships a skill describing the language, and one command installs it
+wherever your assistant looks for instructions:
+
+```console
+$ vela install-skill --list
+$ vela install-skill
+```
+
+`--list` first, because it reports what it found. `install-skill` on its own
+installs for every tool it detects and prints what it did.
+
+| Assistant | Where it goes |
+| --- | --- |
+| Zed, Roo Code, Kilo Code, opencode | `~/.agents/skills/vela/SKILL.md` |
+| Claude Code | `~/.claude/skills/vela/SKILL.md` |
+| opencode | `~/.config/opencode/skills/vela/SKILL.md` |
+| Cursor | `./.cursor/rules/vela.mdc` |
+| GitHub Copilot | `./.github/instructions/vela.instructions.md` |
+| Claude Code, path-scoped | `./.claude/rules/vela.md` |
+| Anything reading `AGENTS.md` | `./AGENTS.md` |
+| Gemini CLI | `./GEMINI.md` |
+
+Aider has no auto-discovery, so the `aider` target prints the one line to add to
+`.aider.conf.yml` rather than rewriting your YAML.
+
+Useful flags:
+
+| Flag | Does |
+| --- | --- |
+| `--target <id>` | Install for one target. Repeatable. |
+| `--scope <s>` | `user`, `project`, or `both` (default). |
+| `--dry-run` | Report what would change, and change nothing. |
+| `--force` | Overwrite a file that Vela did not write. |
+| `--uninstall` | Remove what a previous install wrote. |
+| `--list` | Show every target and whether it is installed. |
+
+Restart your assistant afterwards; they read instructions at startup.
+
+**Why the installed file is small.** `docs/SKILLS.md` is the full reference, at
+59 KB — larger than most assistants will ever load, so installing it directly
+would get it truncated or rejected. The installer copies
+`docs/vela.SKILL.md` instead: about 350 lines covering everything needed to write
+most programs, ending in a pointer to the full reference by absolute path. If
+you upgrade `vela-lang`, run `vela install-skill` again; `--list` flags any
+installed copy that is now out of date.
+
+`vela install-skill --uninstall` only removes files it wrote, and leaves
+directories it did not create.
 
 ## Errors
 
