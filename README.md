@@ -238,7 +238,7 @@ grammar — if it guesses wrong, a blank line ends the entry.
 | `examples/` | Programs that are type-checked and run by `npm run check-examples`. `examples/invalid/` holds programs that are meant to fail, and is skipped by that scan. |
 | `docs/grammar.md` | The full grammar, from lexical structure to static rules. |
 | `docs/images/` | The wordmark and the pipeline diagram, as SVG. |
-| `test/` | 279 tests across the lexer, parser, checker, interpreter, pipeline, and CLI. |
+| `test/` | 282 tests across the lexer, parser, checker, interpreter, pipeline, and CLI. |
 
 ## Design notes
 
@@ -277,6 +277,9 @@ Deliberately absent, listed so their absence reads as a decision:
 - User-defined types, generics, and modules.
 - Forward and mutual function references.
 - Bytecode compilation.
+- Ordering comparisons on anything but `number`. `==` and `!=` work on any two
+  values of the same type, but `<`, `<=`, `>`, and `>=` are numeric-only, so
+  `"a" < "b"` does not compile.
 - `floor`, `round`, and integer division. `examples/temperature.vela` builds all
   three out of `%` instead, which is a fair demonstration of how little the
   language gives you for free.
@@ -285,7 +288,7 @@ Deliberately absent, listed so their absence reads as a decision:
 
 ```console
 $ npm run typecheck        # tsc --noEmit
-$ npm test                 # 279 tests
+$ npm test                 # 282 tests
 $ npm run check-examples   # type-check and run every example
 $ npm run build            # emit dist/ with an executable dist/cli.js
 ```

@@ -226,6 +226,16 @@ rather than `2`. Use `tostring` and `tonumber` to convert deliberately.
 **Comparisons require matching types.** `1 == "0"` and `1 == true` are both
 errors. There is no cross-type equality.
 
+**Ordering comparisons are numeric-only.** `==` and `!=` work on any two values
+of the same type, but `<`, `<=`, `>`, and `>=` require `number` operands, so
+`"a" < "b"` and `true < false` are both errors. There is no lexicographic order
+on strings and no order on `bool`; the only magnitude available for a string is
+`len`, which is a number. The checker and the interpreter agree on this — the
+interpreter routes every ordering operator through the same numeric assertion, so
+it is a rule about the language rather than a gap in the checker. The diagnostic
+is easy to misread, though: `cannot apply '<' to 'string' and 'string'` carries a
+note about `+`, because one operand check serves both operators.
+
 **Conditions must be `bool`.** `if (n)` is an error. `0` and `""` are ordinary
 values of their own types, not falsy, and there is no truthiness anywhere.
 
@@ -265,6 +275,8 @@ statements before the error never execute.
 - The `while`-only-return limitation described above, in the return analysis.
 - No string indexing and no `floor`, `round`, or integer division, so
   `examples/temperature.vela` builds all three out of `%` instead.
+- No ordering on `string` or `bool`, as described under static rules. `==` and
+  `!=` are the whole of the comparison vocabulary for those two types.
 - The REPL's multi-line heuristic is not part of this grammar. It reads balanced
   brackets and trailing operators, so a `while` body is legal on one line here
   just as it is across several.
