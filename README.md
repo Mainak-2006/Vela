@@ -310,14 +310,22 @@ The published package carries `dist/`, `src/`, `docs/`, and `examples/`. Source
 is included on purpose — the sourcemaps point at it, and a package whose
 premise is that it is meant to be read should let you read it.
 
-The VS Code extension in `editors/vscode/` is published separately, to the Visual
-Studio Marketplace, by `.github/workflows/publish.yml`. It has no build step and no
-dependencies, so the workflow packages and publishes it as it stands, authenticated
-by OIDC trusted publishing instead of a stored token. Push a `vscode-v*` tag or
-dispatch the workflow by hand; the extension is versioned by its own
-`package.json`, independently of the npm package above.
+The VS Code extension in `editors/vscode/` is versioned and published separately,
+to the Visual Studio Marketplace, and by hand:
 
-The Marketplace icon, `editors/vscode/media/vela-256.png`, is declared in that
-manifest and has no separate publishing path — the gallery serves it out of the
-VSIX. Swapping it therefore means cutting a new extension version, which is why
-the icon is kept at 256×256 even though the gallery only ever draws it at 128.
+```console
+$ cd editors/vscode
+$ npx @vscode/vsce package
+```
+
+Upload the resulting `.vsix` from the publisher management page. There is
+deliberately no CI job for it. The Marketplace's OIDC trusted-publishing policy is
+not offered to a personally-owned publisher, and the Entra managed-identity
+alternative needs an Azure subscription, so an automated publish would mean either
+a stored PAT or infrastructure this repository does not have. The extension is
+declarative and releases rarely, so the manual step is the cheaper trade.
+
+The Marketplace icon, `editors/vscode/media/vela-256.png`, is declared in the
+extension manifest and has no separate publishing path — the gallery serves it out
+of the VSIX. Swapping it therefore means cutting a new extension version, which is
+why the icon is kept at 256×256 even though the gallery only ever draws it at 128.
