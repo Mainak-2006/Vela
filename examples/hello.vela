@@ -1,0 +1,3 @@
+// hello.vela — the smallest complete program.
+
+print("hello, world");

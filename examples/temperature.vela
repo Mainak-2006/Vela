@@ -1,0 +1,73 @@
+// temperature.vela — functions returning values, and unit conversion.
+//
+// A small worked example of the shape most Vela programs take: pure functions
+// over `number`, with a little string formatting for display.
+
+fn celsiusToFahrenheit(c: number): number {
+    return c * 9 / 5 + 32;
+}
+
+fn fahrenheitToCelsius(f: number): number {
+    return (f - 32) * 5 / 9;
+}
+
+fn kelvinToCelsius(k: number): number {
+    return k - 273.15;
+}
+
+fn celsiusToKelvin(c: number): number {
+    return c + 273.15;
+}
+
+// Vela has no `floor`, so build one from `%`. `x % 1` is the fractional part of
+// x with the sign of x, so subtracting it truncates towards zero for positives
+// and adding it does the same for negatives.
+fn trunc(x: number): number {
+    if (x >= 0) { return x - (x % 1); }
+    return x + ((0 - x) % 1);
+}
+
+// Round half away from zero.
+fn round(x: number): number {
+    if (x >= 0) { return trunc(x + 0.5); }
+    return trunc(x - 0.5);
+}
+
+// Integer division, which Vela does not have. `/` always produces a fraction, so
+// trunc is what turns a quotient back into a whole number.
+fn idiv(a: number, b: number): number {
+    return trunc(a / b);
+}
+
+// One decimal place. Multiply by ten to move the digit we want, round to an
+// integer, then split the whole part from the tenths digit.
+fn oneDecimal(value: number): string {
+    let tenths: number = round(value * 10);
+    let whole: number = idiv(tenths, 10);
+    let fraction: number = tenths % 10;
+    if (fraction < 0) { fraction = 0 - fraction; }
+    return tostring(whole) + "." + tostring(fraction);
+}
+
+fn isFreezing(c: number): bool {
+    return c <= 0;
+}
+
+print("Celsius to Fahrenheit:");
+for (let c: number = -10; c <= 40; c = c + 10) {
+    print("  " + oneDecimal(c) + "C = " + oneDecimal(celsiusToFahrenheit(c)) + "F");
+}
+
+print("");
+print("Fahrenheit to Celsius:");
+for (let f: number = 32; f <= 212; f = f + 36) {
+    print("  " + oneDecimal(f) + "F = " + oneDecimal(fahrenheitToCelsius(f)) + "C");
+}
+
+print("");
+print("Kelvin:");
+print("  273.15K = " + oneDecimal(kelvinToCelsius(273.15)) + "C");
+print("  0C      = " + oneDecimal(celsiusToKelvin(0)) + "K");
+
+print("");
+print("Below freezing: " + tostring(isFreezing(-5)) + " " + tostring(isFreezing(20)));

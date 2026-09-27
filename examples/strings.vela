@@ -1,0 +1,40 @@
+// strings.vela — concatenation, comparison, escapes, and the string built-ins.
+//
+// Vela has no string indexing, so a string can only be built up, not taken
+// apart. Accumulating in a loop is therefore the idiomatic way to build one.
+
+fn repeat(s: string, times: number): string {
+    let out: string = "";
+    for (let i: number = 0; i < times; i = i + 1) {
+        out = out + s;
+    }
+    return out;
+}
+
+fn pad(s: string, width: number): string {
+    let out: string = s;
+    while (len(out) < width) {
+        out = out + ".";
+    }
+    return out;
+}
+
+fn areAnagrams(a: string, b: string): bool {
+    // Without indexing this can only compare the whole string, but it shows
+    // that `==` on strings is a value comparison, not an identity check.
+    return a == b;
+}
+
+let greeting: string = "hello";
+let name: string = "world";
+
+print(greeting + ", " + name + "!");
+print("repeated: " + repeat("ab", 4));
+print("padded:   " + pad("7", 5) + "|");
+print("length:   " + tostring(len(greeting)));
+print("empty:    " + tostring(len("")));
+print("compare:  " + tostring(greeting == "hello") + " " + tostring(greeting == "goodbye"));
+print("anagrams: " + tostring(areAnagrams("abc", "abc")) + " " + tostring(areAnagrams("abc", "abd")));
+print("escapes:  tab[\t] quote[\"] slash[\\]");
+print("types:    " + typeOf(greeting) + " " + typeOf(len(greeting)));
+print("convert:  " + tostring(tonumber("17")) + " " + tostring(tonumber("nope")));

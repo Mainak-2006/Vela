@@ -1,0 +1,3 @@
+// type-error.vela — deliberately does not compile.
+
+let n: number = "ten";

@@ -1,0 +1,24 @@
+// fib.vela — recursion and iteration, side by side.
+
+// Recursive. Each call costs a stack frame, so this is O(2^n) work.
+fn fibRecursive(n: number): number {
+    if (n < 2) { return n; }
+    return fibRecursive(n - 1) + fibRecursive(n - 2);
+}
+
+// Iterative. Constant stack, and fast enough to reach a large n.
+fn fibIterative(n: number): number {
+    let a: number = 0;
+    let b: number = 1;
+    for (let i: number = 0; i < n; i = i + 1) {
+        let next: number = a + b;
+        a = b;
+        b = next;
+    }
+    return a;
+}
+
+print("n  recursive  iterative");
+for (let n: number = 0; n <= 15; n = n + 1) {
+    print(tostring(n) + "  " + tostring(fibRecursive(n)) + "  " + tostring(fibIterative(n)));
+}

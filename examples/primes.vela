@@ -1,0 +1,40 @@
+// primes.vela — a sieve is out of reach without arrays, but trial division
+// shows off `while`, `break`, and boolean short-circuiting.
+
+fn isPrime(n: number): bool {
+    if (n < 2) { return false; }
+    if (n == 2) { return true; }
+    // An even number greater than 2 is never prime, and this short-circuits
+    // before the loop below.
+    if (n % 2 == 0) { return false; }
+
+    let d: number = 3;
+    while (d * d <= n) {
+        if (n % d == 0) { return false; }
+        d = d + 2;
+    }
+    return true;
+}
+
+fn countPrimesUpTo(limit: number): number {
+    let count: number = 0;
+    let n: number = 2;
+    while (n <= limit) {
+        if (isPrime(n)) { count = count + 1; }
+        n = n + 1;
+    }
+    return count;
+}
+
+print("primes up to 100:");
+let first: number = 0;
+for (let n: number = 2; n <= 100; n = n + 1) {
+    if (isPrime(n)) {
+        if (first < 10) { print(tostring(n)); }
+        first = first + 1;
+    }
+}
+
+print("");
+print("count up to 100: " + tostring(countPrimesUpTo(100)));
+print("count up to 1000: " + tostring(countPrimesUpTo(1000)));
