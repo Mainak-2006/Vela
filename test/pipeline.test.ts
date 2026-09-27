@@ -65,6 +65,25 @@ test("compile reports type errors at the check stage", () => {
   assert.match(result.diagnostics[0]!.message, /string/);
 });
 
+test("a type keyword in expression position is a parse error, not a silent literal", () => {
+  // `number` and `string` name both a literal token kind and a type keyword. If
+  // those two kinds collide, `parsePrefix` reads the keyword as a literal and
+  // the program quietly means 0 or "" instead of failing to compile.
+  for (const keyword of ["number", "string"]) {
+    const result = compile("bad.vela", `let x: number = ${keyword};`);
+    assert.equal(result.stage, "parse", `${keyword} in expression position should not compile`);
+    assert.match(result.diagnostics[0]!.message, /expected an expression/);
+  }
+});
+
+test("a literal in type position is a parse error and never reaches the checker", () => {
+  // A numeric literal used to be accepted as a type name, which left the
+  // checker dereferencing an undefined type and crashing with a TypeError.
+  const result = compile("bad.vela", "let x: 5 = 1;");
+  assert.equal(result.stage, "parse", "the parse error stops the pipeline before checking");
+  assert.match(result.diagnostics[0]!.message, /expected a type name/);
+});
+
 test("lexOnly stops after the lexer", () => {
   const result = compile("t.vela", "this is not valid vela at all ((", { lexOnly: true });
   assert.equal(result.stage, "lex");

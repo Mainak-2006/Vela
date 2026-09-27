@@ -134,6 +134,15 @@ describe("lexer: identifiers and keywords", () => {
     assert.deepEqual(lexemes("_a1 B2_c d"), ["_a1", "B2_c", "d"]);
   });
 
+  it("keeps literal and type-keyword kinds distinct", () => {
+    // The two pairs share a lexeme, so only the kind string separates them. If
+    // they ever collide again the parser cannot tell a literal from a type name.
+    assert.notEqual(TOKEN.NUMBER, TOKEN.TYPE_NUMBER);
+    assert.notEqual(TOKEN.STRING, TOKEN.TYPE_STRING);
+    assert.deepEqual(kinds("5 \"s\""), [TOKEN.NUMBER, TOKEN.STRING]);
+    assert.deepEqual(kinds("number string"), [TOKEN.TYPE_NUMBER, TOKEN.TYPE_STRING]);
+  });
+
   it("recognises every keyword", () => {
     const kindsOfKeywords = kinds("let fn return if else while for break continue print number string bool void true false");
     assert.deepEqual(kindsOfKeywords, [

@@ -9,10 +9,13 @@
 import type { SourceLocation } from "../diagnostics.js";
 
 export const TOKEN = {
-  // Literals
+  // Literals. `NUMBER`/`STRING` are suffixed so they stay distinct from the
+  // `TYPE_NUMBER`/`TYPE_STRING` type keywords below, which share their lexemes.
+  // A token's `kind` has to tell a literal apart from a type name, or the
+  // parser accepts one where the other belongs.
   IDENT: "ident",
-  NUMBER: "number",
-  STRING: "string",
+  NUMBER: "number-literal",
+  STRING: "string-literal",
 
   // Keywords
   LET: "let",
