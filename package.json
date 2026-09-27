@@ -1,23 +1,54 @@
 {
-  "name": "vela",
+  "name": "vela-lang",
   "version": "0.1.0",
   "description": "Vela — a small statically-typed language and its compiler (lexer, parser, type checker, tree-walking interpreter).",
+  "license": "MIT",
+  "author": "Mainak Kundu <mainakkundu13@gmail.com>",
+  "homepage": "https://github.com/Mainak-2006/Vela#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Mainak-2006/Vela.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Mainak-2006/Vela/issues"
+  },
+  "keywords": [
+    "compiler",
+    "interpreter",
+    "language",
+    "type-checker",
+    "static-analysis"
+  ],
   "type": "module",
   "bin": {
-    "vela": "./dist/cli.js"
+    "vela": "./dist/cli.js",
+    "vela-lang": "./dist/cli.js"
   },
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
-    "dist"
+    "dist",
+    "src",
+    "docs",
+    "examples"
   ],
   "scripts": {
     "dev": "tsx watch src/cli.ts repl",
     "vela": "tsx src/cli.ts",
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/cli.js",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
-    "check-examples": "tsx src/cli.ts check examples/*.vela",
-    "run-examples": "tsx src/cli.ts run examples/hello.vela"
+    "test:watch": "tsx --test --watch test/*.test.ts",
+    "check-examples": "tsx scripts/run-examples.ts",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run typecheck && npm test && npm run check-examples"
   },
   "engines": {
     "node": ">=20"
