@@ -15,12 +15,18 @@ dependencies. Everything is contributed through the manifest.
 
 ## Install
 
-From a `.vsix` built in this repo:
+From the Marketplace — search for `Vela` in VS Code's Extensions view, or:
+
+```sh
+code --install-extension mainakkundu.vela-language
+```
+
+To install a local build instead, including one made from uncommitted changes:
 
 ```sh
 cd editors/vscode
 npx @vscode/vsce package
-code --install-extension vela-language-0.1.0.vsix
+code --install-extension vela-language-*.vsix
 ```
 
 ## Language reference

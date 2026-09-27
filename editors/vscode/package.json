@@ -32,7 +32,7 @@
     "statically-typed",
     "language"
   ],
-  "icon": "media/vela-128.png",
+  "icon": "media/vela-256.png",
   "galleryBanner": {
     "color": "#0f766e",
     "theme": "dark"
