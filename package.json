@@ -1,6 +1,6 @@
 {
   "name": "vela-lang",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vela — a small statically-typed language and its compiler (lexer, parser, type checker, tree-walking interpreter).",
   "license": "MIT",
   "author": "Mainak Kundu <mainakkundu13@gmail.com>",

@@ -228,7 +228,7 @@ grammar — if it guesses wrong, a blank line ends the entry.
 | `src/index.ts` | The public API, for embedding the compiler in something else. |
 | `examples/` | Programs that are type-checked and run by `npm run check-examples`. `examples/invalid/` holds programs that are meant to fail, and is skipped by that scan. |
 | `docs/grammar.md` | The full grammar, from lexical structure to static rules. |
-| `test/` | 278 tests across the lexer, parser, checker, interpreter, pipeline, and CLI. |
+| `test/` | 279 tests across the lexer, parser, checker, interpreter, pipeline, and CLI. |
 
 ## Design notes
 
@@ -275,7 +275,7 @@ Deliberately absent, listed so their absence reads as a decision:
 
 ```console
 $ npm run typecheck        # tsc --noEmit
-$ npm test                 # 278 tests
+$ npm test                 # 279 tests
 $ npm run check-examples   # type-check and run every example
 $ npm run build            # emit dist/ with an executable dist/cli.js
 ```

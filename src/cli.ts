@@ -33,6 +33,18 @@ Usage
 
 Exit status is 0 on success and 1 if any stage reported an error.`;
 
+/**
+ * A reader that goes away — `vela run fizzbuzz.vela | head -5` — leaves us
+ * writing to a closed pipe, and Node reports that as an `error` event on stdout.
+ * Unhandled, it becomes a stack trace, which is a crash for something that is
+ * really just a program that printed more than anyone wanted to read. Exiting
+ * quietly is what every other filter in a pipeline does.
+ */
+process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EPIPE") process.exit(0);
+  throw error;
+});
+
 async function main(argv: readonly string[]): Promise<number> {
   const [command, ...rest] = argv;
 

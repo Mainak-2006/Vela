@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -163,4 +163,34 @@ test("vela ast reports a syntax error and still shows the partial tree", () => {
 test("an unknown flag is not silently treated as a file", () => {
   const { status } = vela("run", "--nonsense");
   assert.equal(status, 1);
+});
+
+test("a reader that hangs up ends the run quietly", async () => {
+  // Enough output that the child cannot finish before the pipe closes, so this
+  // reliably reaches the write that fails.
+  const path = source(
+    "epipe.vela",
+    "for (let i: number = 0; i < 20000; i = i + 1) { print(i); }\n",
+  );
+
+  const child = spawn("npx", ["tsx", cli, "run", path], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr += String(chunk);
+  });
+
+  // Hang up the way `head` does: take one line, then close.
+  await new Promise((resolve) => child.stdout.once("data", resolve));
+  child.stdout.destroy();
+
+  const status = await new Promise<number | null>((resolve) => {
+    child.on("close", resolve);
+  });
+
+  assert.equal(stderr, "", "a closed pipe is not a crash, so nothing is reported");
+  assert.equal(status, 0, "the program ends the way a filter ends, not with a failure");
 });
