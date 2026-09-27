@@ -47,6 +47,7 @@
     "test": "tsx --test test/*.test.ts",
     "test:watch": "tsx --test --watch test/*.test.ts",
     "check-examples": "tsx scripts/run-examples.ts",
+    "vscode:package": "cd editors/vscode && npx --yes @vscode/vsce@4 package",
     "prepare": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test && npm run check-examples"
   },

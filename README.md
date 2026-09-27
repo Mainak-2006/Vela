@@ -314,16 +314,18 @@ The VS Code extension in `editors/vscode/` is versioned and published separately
 to the Visual Studio Marketplace, and by hand:
 
 ```console
-$ cd editors/vscode
-$ npx @vscode/vsce package
+$ npm run vscode:package
 ```
 
-Upload the resulting `.vsix` from the publisher management page. There is
-deliberately no CI job for it. The Marketplace's OIDC trusted-publishing policy is
-not offered to a personally-owned publisher, and the Entra managed-identity
-alternative needs an Azure subscription, so an automated publish would mean either
-a stored PAT or infrastructure this repository does not have. The extension is
-declarative and releases rarely, so the manual step is the cheaper trade.
+That packages `editors/vscode/` with a pinned `vsce` major, because the icon and
+the gallery banner are baked into the VSIX and a major bump is allowed to change
+how that happens. Upload the resulting `.vsix` from the publisher management page.
+There is deliberately no CI job for it. The Marketplace's OIDC trusted-publishing
+policy is not offered to a personally-owned publisher, and the Entra
+managed-identity alternative needs an Azure subscription, so an automated publish
+would mean either a stored PAT or infrastructure this repository does not have.
+The extension is declarative and releases rarely, so the manual step is the
+cheaper trade.
 
 The Marketplace icon, `editors/vscode/media/vela-256.png`, is declared in the
 extension manifest and has no separate publishing path — the gallery serves it out

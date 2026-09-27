@@ -15,17 +15,21 @@ dependencies. Everything is contributed through the manifest.
 
 ## Install
 
-From the Marketplace — search for `Vela` in VS Code's Extensions view, or:
+From the Marketplace — search for `Vela by Mainak` in VS Code's Extensions view, or:
 
 ```sh
 code --install-extension mainakkundu.vela-language
 ```
 
+The listing is not called plain `Vela` because display names are unique across the
+whole Marketplace, and an unrelated extension already holds that one. The
+extension id is still `vela-language`, so the install command above never changes.
+
 To install a local build instead, including one made from uncommitted changes:
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package
+npx @vscode/vsce@4 package
 code --install-extension vela-language-*.vsix
 ```
 
