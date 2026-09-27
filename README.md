@@ -106,8 +106,16 @@ no classes, and no user-defined types. That is a deliberate constraint: the poin
 is to keep the pipeline legible, and every one of those features is a chapter's
 worth of design on its own.
 
-The full grammar is in [`docs/grammar.md`](docs/grammar.md). The rules worth
-knowing before reading any other code:
+The full grammar is in [`docs/grammar.md`](docs/grammar.md), and
+[`docs/SKILLS.md`](docs/SKILLS.md) is the same language organised for writing
+code rather than reading it — a table of what does *not* exist in Vela and what to
+write instead, the standard library recipes that stand in for the missing
+math and string functions, the full diagnostic catalogue, and a checklist to run
+before calling a program correct. It is the file to hand an AI model, and it is
+worth reading before the grammar if you are here to write Vela rather than to
+study the compiler.
+
+The rules worth knowing before reading any other code:
 
 - **Statements end with `;`.** There is no newline sensitivity.
 - **Types are mandatory.** `let x = 1;` is an error; write `let x: number = 1;`.
@@ -237,6 +245,7 @@ grammar — if it guesses wrong, a blank line ends the entry.
 | `src/index.ts` | The public API, for embedding the compiler in something else. |
 | `examples/` | Programs that are type-checked and run by `npm run check-examples`. `examples/invalid/` holds programs that are meant to fail, and is skipped by that scan. |
 | `docs/grammar.md` | The full grammar, from lexical structure to static rules. |
+| `docs/SKILLS.md` | The same language as a writing guide: what Vela cannot do, the recipes that replace the missing library, every diagnostic, and a pre-submission checklist. Written to be handed to an AI model. |
 | `docs/images/` | The wordmark and the pipeline diagram, as SVG. |
 | `test/` | 282 tests across the lexer, parser, checker, interpreter, pipeline, and CLI. |
 
