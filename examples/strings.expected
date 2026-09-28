@@ -1,0 +1,15 @@
+hello, world!
+repeated: abababab
+padded:   7....|
+length:   5
+empty:    0
+compare:  true false
+same:     true false
+anagram:  true false
+prefix:   true false
+count:    3 0
+index:    ho e
+indexed:  1
+escapes:  tab[	] quote["] slash[\]
+types:    string number string
+convert:  17 0

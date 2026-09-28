@@ -224,20 +224,25 @@ export function renderDiagnostic(source: SourceFile, diagnostic: Diagnostic): st
   const gutterWidth = String(location.line).length;
 
   // Column is 1-based; the caret run length is clamped to the end of the line so
-  // a span that runs past a newline does not draw underscores forever.
+  // a span that runs past a newline does not draw underscores forever. The
+  // minimum of one caret is applied after the clamp, because clamping an empty
+  // line to zero characters would silently drop the span entirely — which is
+  // what made a diagnostic about a file with no content look like it had no
+  // location at all.
   const caretStart = Math.max(0, location.column - 1);
   const lineLength = lineText.length;
   const caretEnd = Math.min(
     lineLength,
     Math.max(caretStart + Math.max(1, location.length), caretStart + 1),
   );
+  const caretWidth = Math.max(1, caretEnd - caretStart);
 
   const pad = " ".repeat(gutterWidth);
   const lines: string[] = [];
   lines.push(`${severity}: ${firstLine(diagnostic.message)}`);
   lines.push(`${pad} |`);
   lines.push(`${padLine(gutterWidth, location.line)} | ${lineText}`);
-  lines.push(`${pad} | ${" ".repeat(caretStart)}${CARET.repeat(caretEnd - caretStart)}`);
+  lines.push(`${pad} | ${" ".repeat(caretStart)}${CARET.repeat(caretWidth)}`);
   for (const note of diagnostic.notes) {
     lines.push(`${pad} | note: ${note}`);
   }

@@ -100,11 +100,15 @@ for (let i: number = 1; i <= 20; i = i + 1) {
 }
 ```
 
-There are four types — `number`, `string`, `bool`, and `void` — plus the
-function types that declarations produce. There are no collections, no modules,
-no classes, and no user-defined types. That is a deliberate constraint: the point
-is to keep the pipeline legible, and every one of those features is a chapter's
-worth of design on its own.
+There are four primitive types — `number`, `string`, `bool`, and `void` — plus
+the bare `function` type. There are no collections, no modules, no classes, and
+no user-defined types. That is a deliberate constraint: the point is to keep the
+pipeline legible, and every one of those features is a chapter's worth of design
+on its own.
+
+Four things that used to be impossible are not any more: `s[i]` indexes a string,
+`trunc`/`floor`/`ceil`/`round`/`abs`/`min`/`max`/`idiv` are built in, functions can
+be stored and passed as `function` values, and forward and mutual recursion work.
 
 The full grammar is in [`docs/grammar.md`](docs/grammar.md), and
 [`docs/SKILLS.md`](docs/SKILLS.md) is the same language organised for writing
@@ -120,20 +124,32 @@ The rules worth knowing before reading any other code:
 - **Statements end with `;`.** There is no newline sensitivity.
 - **Types are mandatory.** `let x = 1;` is an error; write `let x: number = 1;`.
 - **Conditions must be `bool`.** No truthiness.
-- **Functions are declared before use.** Recursion works, because a function's
-  own name is in scope inside its body. Forward references and mutual recursion
-  do not.
+- **Functions may be used before they are written.** Signatures are hoisted
+  before any body is checked, so forward references and mutual recursion both
+  work. Variables are not hoisted: a `let` must be declared before use.
 - **Short-circuiting is real.** `&&` and `||` evaluate the right side only when
   they must, and `&& false && (1 / 0 == 0)` is a perfectly safe expression.
+- **`++` and `--` are statements.** They have no value, so `i++;` and
+  `for (...; i++)` work but `let y: number = i++;` does not. A leading `--` is
+  still a doubled negation, so `--1` is `1`.
 
 ### Built-in functions
 
 | Function | Signature | Notes |
 | --- | --- | --- |
 | `tostring(x)` | `(any) -> string` | Numbers render without a decimal point. |
-| `tonumber(s)` | `(string) -> number` | Returns `0` if the string is not numeric. |
-| `typeOf(x)` | `(any) -> string` | Returns `"number"`, `"string"`, `"bool"`, `"void"`, or `"function"`. |
-| `len(s)` | `(string) -> number` | Character count. |
+| `tonumber(s)` | `(any) -> number` | Returns `0` if the string is not numeric, or for any non-string. |
+| `typeOf(x)` | `(any) -> string` | Returns `"number"`, `"string"`, `"bool"`, `"void"`, `"function"`, or `"native"`. |
+| `len(s)` | `(string) -> number` | UTF-16 code-unit count, the same unit `s[i]` indexes. |
+| `trunc(x)` | `(number) -> number` | Toward zero, so `trunc(-2.7)` is `-2`. |
+| `floor(x)` | `(number) -> number` | `floor(-2.7)` is `-3`. |
+| `ceil(x)` | `(number) -> number` | `ceil(-2.7)` is `-2`. |
+| `round(x)` | `(number) -> number` | Halves away from zero: `round(2.5)` is `3`, `round(-2.5)` is `-3`. |
+| `abs(x)` | `(number) -> number` | |
+| `min(a, b)` | `(number, number) -> number` | |
+| `max(a, b)` | `(number, number) -> number` | |
+| `idiv(a, b)` | `(number, number) -> number` | Toward zero, like `%`. Dividing by zero gives `0`. |
+| `read()` | `() -> string` | One line of stdin, newline stripped. `""` at end of input. |
 
 `print` is a statement, not a function, so `print(1);` is a parse error rather
 than a call to something named `print`.
@@ -301,7 +317,7 @@ grammar — if it guesses wrong, a blank line ends the entry.
 | `docs/grammar.md` | The full grammar, from lexical structure to static rules. |
 | `docs/SKILLS.md` | The same language as a writing guide: what Vela cannot do, the recipes that replace the missing library, every diagnostic, and a pre-submission checklist. Written to be handed to an AI model. |
 | `docs/images/` | The wordmark and the pipeline diagram, as SVG. |
-| `test/` | 282 tests across the lexer, parser, checker, interpreter, pipeline, and CLI. |
+| `test/` | 386 tests across the lexer, parser, checker, interpreter, pipeline, CLI, and skill installer. |
 
 ## Design notes
 
@@ -335,23 +351,28 @@ something to bolt on outside it.
 
 Deliberately absent, listed so their absence reads as a decision:
 
-- Arrays and collections, which is why `examples/strings.vela` can build a
-  string but not take one apart.
+- Arrays and collections. `s[i]` indexes a string and nothing else, so a string
+  is a sequence rather than a container: there is no way to build a list, and
+  `examples/strings.vela` flattens its input into strings and counts instead.
 - User-defined types, generics, and modules.
-- Forward and mutual function references.
+- A writable function type. `function` names no signature, so a call through a
+  stored function is unchecked; the alternative would have made a function
+  storable under only one exact signature. See `docs/SKILLS.md` section 18.
 - Bytecode compilation.
 - Ordering comparisons on anything but `number`. `==` and `!=` work on any two
   values of the same type, but `<`, `<=`, `>`, and `>=` are numeric-only, so
   `"a" < "b"` does not compile.
-- `floor`, `round`, and integer division. `examples/temperature.vela` builds all
-  three out of `%` instead, which is a fair demonstration of how little the
-  language gives you for free.
+- `sqrt` and `pow`. The eight numeric built-ins cover rounding and integer
+  division, which is the part worth promising exactly; `docs/SKILLS.md` section
+  11 writes the other two out of `trunc`.
+- Code-point iteration. `len` and `s[i]` count UTF-16 code units, so an emoji is
+  two indices wide and reading one half gives a broken character.
 
 ## Development
 
 ```console
 $ npm run typecheck        # tsc --noEmit
-$ npm test                 # 282 tests
+$ npm test                 # 386 tests
 $ npm run check-examples   # type-check and run every example
 $ npm run build            # emit dist/ with an executable dist/cli.js
 ```

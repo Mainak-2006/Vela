@@ -1,0 +1,35 @@
+// Summarise the input lines: how many, how long in total, and how long the
+// longest one was. Reads from stdin, so pipe it a file:
+//
+//   vela run examples/linecount.vela < notes.txt
+//
+// Everything is tracked in numbers as each line arrives, so no line is ever
+// stored. Vela has no collections, and that turns out to be the natural way to
+// write this: a summary only ever needs the running totals.
+print("enter some lines, one per line; send an empty line to finish");
+
+let count: number = 0;
+let total: number = 0;
+let longest: number = 0;
+let longestAt: number = 0;
+
+let line: string = read();
+while (line != "") {
+    let n: number = len(line);
+    if (n > longest) {
+        longest = n;
+        longestAt = count;
+    }
+    count = count + 1;
+    total = total + n;
+    line = read();
+}
+
+if (count == 0) {
+    print("no input");
+} else {
+    print("lines:   " + tostring(count));
+    print("chars:   " + tostring(total));
+    print("average: " + tostring(idiv(total, count)));
+    print("longest: " + tostring(longest) + " characters, line " + tostring(longestAt + 1));
+}

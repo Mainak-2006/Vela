@@ -8,7 +8,7 @@
  * reference can never be the thing that gets loaded — it has to sit behind a
  * lean entry point that an agent opens on demand.
  *
- * `docs/vela.SKILL.md` is that entry point: about 350 lines, and enough of the
+ * `docs/vela.SKILL.md` is that entry point: a few hundred lines, and enough of the
  * language to write most programs without opening anything else. This module
  * copies it into wherever a given tool looks for instructions, rewriting the one
  * placeholder that needs a machine-specific answer — the absolute path of the
@@ -57,7 +57,6 @@ interface SkillMeta {
   readonly description: string;
   readonly license: string | null;
   readonly compatibility: string | null;
-  readonly version: string;
 }
 
 /** What the installer does with a target's destination. */
@@ -181,7 +180,6 @@ function readMeta(head: string): SkillMeta {
     description: required("description"),
     license: top.get("license") ?? null,
     compatibility: top.get("compatibility") ?? null,
-    version: required("version"),
   };
 }
 
@@ -191,7 +189,34 @@ export interface Source {
   readonly body: string;
   /** The absolute path of the full reference. */
   readonly reference: string;
+  /**
+   * The package version, read from `package.json` rather than the stub's
+   * frontmatter.
+   *
+   * This is the version stamped into every installed file and the one `--list`
+   * compares against, so it has to be the real release version. Keeping a second
+   * copy in the stub's frontmatter would mean a release that bumps one and not
+   * the other reports every user's install as outdated forever — a bug that is
+   * invisible until the first upgrade and then hits every user at once.
+   */
+  readonly version: string;
   readonly lineCount: number;
+}
+
+/** The package version, which is the only place it is recorded. */
+function readPackageVersion(): string {
+  const path = join(docsDirectory(), "..", "package.json");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (thrown) {
+    throw new Error(`cannot read the version from ${path}: ${(thrown as Error).message}`);
+  }
+  const version = (parsed as { version?: unknown }).version;
+  if (typeof version !== "string" || version === "") {
+    throw new Error(`${path} has no 'version' string`);
+  }
+  return version;
 }
 
 /** Read the stub and the full reference, and check the stub against the spec's limits. */
@@ -226,7 +251,7 @@ export function readSource(): Source {
     );
   }
 
-  return { meta, body, reference: referencePath, lineCount };
+  return { meta, body, reference: referencePath, version: readPackageVersion(), lineCount };
 }
 
 /** A YAML double-quoted scalar, so a description containing `: ` or `#` still parses. */
@@ -235,11 +260,11 @@ function quoted(value: string): string {
 }
 
 /** The frontmatter every skill-directory target shares. */
-function skillFrontmatter(meta: SkillMeta): string[] {
+function skillFrontmatter(meta: SkillMeta, version: string): string[] {
   const lines = [`name: ${meta.name}`, `description: ${quoted(meta.description)}`];
   if (meta.license !== null) lines.push(`license: ${meta.license}`);
   if (meta.compatibility !== null) lines.push(`compatibility: ${meta.compatibility}`);
-  lines.push("metadata:", `  ${MARKER}: ${quoted(meta.version)}`);
+  lines.push("metadata:", `  ${MARKER}: ${quoted(version)}`);
   return lines;
 }
 
@@ -251,7 +276,7 @@ function commentMarker(version: string): string {
 function render(source: Source, target: Target): string {
   const body = source.body.replaceAll(PLACEHOLDER, source.reference);
   if (target.frontmatter.length === 0) {
-    return `${commentMarker(source.meta.version)}\n\n${body.replace(/^\n+/, "")}`;
+    return `${commentMarker(source.version)}\n\n${body.replace(/^\n+/, "")}`;
   }
   return `---\n${target.frontmatter.join("\n")}\n---\n\n${body.replace(/^\n+/, "")}`;
 }
@@ -263,7 +288,7 @@ function render(source: Source, target: Target): string {
  */
 export function buildTargets(env: Environment, source: Source): Target[] {
   const { home, cwd } = env;
-  const skill = skillFrontmatter(source.meta);
+  const skill = skillFrontmatter(source.meta, source.version);
   const userSkill = (dir: readonly string[]): string => join(home, ...dir, SKILL_NAME, "SKILL.md");
 
   return [
@@ -316,7 +341,7 @@ export function buildTargets(env: Environment, source: Source): Target[] {
         'globs: "**/*.vela"',
         "alwaysApply: false",
         "metadata:",
-        `  ${MARKER}: ${quoted(source.meta.version)}`,
+        `  ${MARKER}: ${quoted(source.version)}`,
       ],
     },
     {
@@ -326,7 +351,7 @@ export function buildTargets(env: Environment, source: Source): Target[] {
       mode: "write",
       path: join(cwd, ".github", "instructions", "vela.instructions.md"),
       probes: [join(cwd, ".github")],
-      frontmatter: [`applyTo: "**/*.vela"`, "metadata:", `  ${MARKER}: ${quoted(source.meta.version)}`],
+      frontmatter: [`applyTo: "**/*.vela"`, "metadata:", `  ${MARKER}: ${quoted(source.version)}`],
     },
     {
       id: "claude-rules",
@@ -335,7 +360,7 @@ export function buildTargets(env: Environment, source: Source): Target[] {
       mode: "write",
       path: join(cwd, ".claude", "rules", "vela.md"),
       probes: [join(cwd, ".claude")],
-      frontmatter: ['paths: ["**/*.vela"]', "metadata:", `  ${MARKER}: ${quoted(source.meta.version)}`],
+      frontmatter: ['paths: ["**/*.vela"]', "metadata:", `  ${MARKER}: ${quoted(source.version)}`],
     },
     {
       id: "agents-project",
@@ -441,7 +466,7 @@ function apply(target: Target, source: Source, options: Options): Outcome {
     const line = `@${sourcePath}`;
     // Both branches add the same three lines so that a later `--list` can tell
     // the file is ours even when we appended to a file the user already had.
-    const block = [commentMarker(source.meta.version), `<!-- see the Vela skill for ${sourcePath} -->`, line];
+    const block = [commentMarker(source.version), `<!-- see the Vela skill for ${sourcePath} -->`, line];
     let text = "";
     if (existsSync(target.path)) {
       try {
@@ -473,7 +498,7 @@ function apply(target: Target, source: Source, options: Options): Outcome {
       detail: `${target.path} already exists and was not written by vela; pass --force to overwrite`,
     };
   }
-  if (existing === source.meta.version) {
+  if (existing === source.version) {
     return { target, status: "current", detail: target.path };
   }
   if (options.dryRun) {

@@ -9,14 +9,22 @@
 
 import type { SourceLocation } from "../diagnostics.js";
 
-/** The four primitive type names usable in annotations. */
-export type PrimitiveTypeName = "number" | "string" | "bool" | "void";
+/**
+ * The type names usable in annotations.
+ *
+ * `function` is the odd one out: the other four are primitives, and this one names
+ * the *shape* of a value without naming its parameters or return type. It is why a
+ * function can be stored in a variable, at the cost of not checking the signature
+ * at the call site.
+ */
+export type PrimitiveTypeName = "number" | "string" | "bool" | "void" | "function";
 
 export const PRIMITIVE_TYPE_NAMES: readonly PrimitiveTypeName[] = [
   "number",
   "string",
   "bool",
   "void",
+  "function",
 ];
 
 interface NodeBase {
@@ -136,7 +144,8 @@ export type Expression =
   | BinaryExpression
   | LogicalExpression
   | AssignmentExpression
-  | CallExpression;
+  | CallExpression
+  | IndexExpression;
 
 export interface NumberLiteral extends NodeBase {
   readonly kind: "numberLiteral";
@@ -206,6 +215,19 @@ export interface CallExpression extends NodeBase {
   readonly kind: "call";
   readonly callee: Expression;
   readonly args: readonly Expression[];
+}
+
+/**
+ * Reading one code unit out of a string: `s[i]`.
+ *
+ * Vela has no collections, so a string is the only thing that can be indexed. The
+ * result is a one-code-unit string rather than a `number`, which keeps every
+ * indexed result a `string` and means the usual `+` and `len` rules still apply.
+ */
+export interface IndexExpression extends NodeBase {
+  readonly kind: "index";
+  readonly target: Expression;
+  readonly index: Expression;
 }
 
 // ------------------------------------------------------------------- helpers

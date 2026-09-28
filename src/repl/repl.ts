@@ -25,7 +25,7 @@ import { tokenize } from "../lexer/lexer.js";
 import type { Symbol } from "../types/checker.js";
 import { functionType, primitiveType } from "../types/types.js";
 import { Interpreter, RuntimeError, createGlobalEnvironment } from "../runtime/interpreter.js";
-import { displayValue, setOutput, type Value } from "../runtime/values.js";
+import { displayValue, setInput, setOutput, type Value } from "../runtime/values.js";
 import { compile } from "../pipeline.js";
 
 const PROMPT = "vela> ";
@@ -34,6 +34,13 @@ const CONTINUATION = "  ... ";
 export interface ReplOptions {
   readonly input?: NodeJS.ReadableStream;
   readonly output?: NodeJS.WritableStream;
+  /**
+   * Data lines to serve to `read()`, drained one per call. The REPL owns the
+   * terminal for its own input, so it cannot also read descriptor 0; an embedder
+   * that wants `read()` to work passes the lines here. With none, `read()` is
+   * immediately at end of input and returns `""`.
+   */
+  readonly inputLines?: readonly string[];
   /** Called when the user asks to exit. */
   readonly onExit?: () => void;
 }
@@ -77,12 +84,16 @@ export function isIncomplete(text: string): boolean {
   let last: string | null = null;
   for (const token of tokens) {
     switch (token.kind) {
+      // `[` belongs here because `s[` is as unfinished as `s(`. Indexing is a
+      // suffix, so the same heuristic covers both.
       case TOKEN.LEFT_BRACE:
       case TOKEN.LEFT_PAREN:
+      case TOKEN.LEFT_BRACKET:
         depth++;
         break;
       case TOKEN.RIGHT_BRACE:
       case TOKEN.RIGHT_PAREN:
+      case TOKEN.RIGHT_BRACKET:
         depth--;
         break;
       case TOKEN.EOF:
@@ -95,9 +106,12 @@ export function isIncomplete(text: string): boolean {
   if (last === null) return false;
 
   // A trailing binary operator, a comma, or an opening bracket means the
-  // expression is unfinished.
+  // expression is unfinished. The compound-assignment operators belong here too,
+  // so typing `x +=` asks for a right-hand side instead of failing.
   return [
     TOKEN.PLUS, TOKEN.MINUS, TOKEN.STAR, TOKEN.SLASH, TOKEN.PERCENT,
+    TOKEN.PLUS_EQUAL, TOKEN.MINUS_EQUAL, TOKEN.STAR_EQUAL,
+    TOKEN.SLASH_EQUAL, TOKEN.PERCENT_EQUAL,
     TOKEN.EQUAL, TOKEN.EQUAL_EQUAL, TOKEN.BANG_EQUAL,
     TOKEN.LESS, TOKEN.LESS_EQUAL, TOKEN.GREATER, TOKEN.GREATER_EQUAL,
     TOKEN.AND_AND, TOKEN.OR_OR, TOKEN.COMMA, TOKEN.COLON,
@@ -110,6 +124,7 @@ export class Repl {
   private readonly known: Symbol[] = [];
   private buffer = "";
   private restoreOutput: (() => void) | null = null;
+  private restoreInput: (() => void) | null = null;
 
   constructor(private readonly options: ReplOptions = {}) {
     // Route the interpreter's own output through our stream too. Without this,
@@ -128,12 +143,24 @@ export class Repl {
   dispose(): void {
     this.restoreOutput?.();
     this.restoreOutput = null;
+    this.restoreInput?.();
+    this.restoreInput = null;
   }
 
   async start(): Promise<void> {
     const input = this.options.input ?? process.stdin;
     const output = this.options.output ?? process.stdout;
     const rl = createInterface({ input, output, prompt: PROMPT, terminal: true }) as Interface;
+
+    // The interpreter reads stdin synchronously, but readline has already buffered
+    // the whole stream, so descriptor 0 is empty by the time an entry runs, and
+    // re-reading it would race the next thing the user types. So `read()` is served
+    // from a queue the embedder filled, and that queue is empty unless it says
+    // otherwise -- which means `read()` reports end of input rather than handing
+    // back the line that was just typed, which would be a source of Vela code
+    // answering a question about the outside world.
+    const data = [...(this.options.inputLines ?? [])];
+    this.restoreInput = setInput(() => (data.length > 0 ? data.shift()! : ""));
 
     this.banner();
     output.write(PROMPT);

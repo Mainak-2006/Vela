@@ -241,6 +241,14 @@ class AstPrinter {
         this.close(")");
         return;
       }
+
+      case "index": {
+        this.open(`(index${this.at(expression.location)}`);
+        this.printExpression(expression.target);
+        this.printExpression(expression.index);
+        this.close(")");
+        return;
+      }
     }
   }
 }

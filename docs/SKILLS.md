@@ -67,9 +67,9 @@ for (let i: number = 1; i <= 20; i = i + 1) {
 }
 ```
 
-Types: `number`, `string`, `bool`, `void`. Nothing is inferred — every variable,
-every parameter, and every return type is written out. There are no collections,
-no modules, no classes, and no user-defined types.
+Types: `number`, `string`, `bool`, `void`, and the bare `function`. Nothing is
+inferred — every variable, every parameter, and every return type is written out.
+There are no collections, no modules, no classes, and no user-defined types.
 
 Vela's design goal is legibility over convenience. Almost every restriction below
 exists because the thing it removes is also the thing that makes a program hard
@@ -116,20 +116,29 @@ if (n > 0) { ... }     // correct
 if (n) { ... }         // error: this condition must be 'bool', but it is 'number'
 ```
 
-### Rule 4 — Functions are declared before use. Recursion works, forward references don't
+### Rule 4 — Functions may be used before they are written
 
-A function's own name is in scope inside its body, so recursion is fine. But a
-function is not in scope before its `fn` declaration, so mutual recursion is a
-compile error.
+Every function signature in a declaration list is installed before any body in
+that list is checked. A forward call resolves, and two functions that call each
+other both resolve.
 
 ```vela
 fn isEven(n: number): bool { if (n == 0) { return true; } return isOdd(n - 1); }
 fn isOdd(n: number): bool { if (n == 0) { return false; } return isEven(n - 1); }
-// error: cannot find 'isOdd' in this scope
+print(tostring(isEven(10)));   // true
 ```
 
-**How to write mutual recursion:** collapse both directions into one function
-with a mode parameter, or restructure so only one direction is needed.
+This is the same in every scope, not just at the top level: a block hoists its
+own functions too, so a pair of mutually recursive helpers can be siblings
+inside a function body.
+
+Variables are different. A `let` must be declared before use, because its type
+comes from a value that has to be computed first.
+
+```vela
+print(later);
+let later: number = 1;         // error: cannot find 'later' in this scope
+```
 
 ### Rule 5 — Nothing is ever coerced
 
@@ -155,8 +164,8 @@ feature elsewhere, and every one of them is a compile error in Vela.
 | You want to write | Why it fails | Do this instead |
 | --- | --- | --- |
 | `let x = 1;` | Types are mandatory | `let x: number = 1;` |
-| `x++`, `x--`, `x += 1` | No compound assignment | `x = x + 1;` |
-| `a[i]`, indexing | `[` is not even a token — lex error | Restructure, or use a loop over a counter |
+| `let y: number = i++;` | `++` is a statement, so it has no value | `i++;` on its own line |
+| `i + j++` | Same: nothing to add | `i++;` then use `i` |
 | `a[i] = x`, arrays, lists | No collections exist | Model a sequence with a function + recursion, or a fixed set of variables |
 | `for (x of xs)`, `for (let x in xs)` | `for` has exactly one C-style form | Three-part C `for`, or a `while` with a manual index |
 | `a ? b : c` | No ternary | `if (a) { b = 1; } else { b = 2; }` |
@@ -170,8 +179,8 @@ feature elsewhere, and every one of them is a compile error in Vela.
 | `class`, `struct`, `enum`, `interface` | No user-defined types | Functions over primitives |
 | Generic `T`, `list<T>` | No generics | A function per element type |
 | `public` / `private` / `static` | No access modifiers | Top-level `fn` is the whole API |
-| `s.length`, `s.upper()`, `s.split()` | `len()` is the only string function | `len(s)`; build the rest with `+` and `==` |
-| `Math.sqrt`, `abs`, `min`, `max`, `floor`, `round`, `pow` | No math library | Write them — see [section 11](#11-standard-library-recipes) |
+| `s.length`, `s.upper()`, `s.split()`, `s[i]` on a non-string | `len()` and `s[i]` are all there is | `len(s)`, `s[i]`; build the rest with `+` |
+| `Math.sqrt`, `Math.pow` | Only the eight numeric built-ins exist | `trunc`, `abs`, ... then write `sqrt` — see [section 11](#11-standard-library-recipes) |
 | `null`, `undefined`, `NaN` as a value | `null` is unnameable and unchecked | Sentinel numbers (`0 - 1`, `-1`) with a documented meaning |
 | `f(1,)` trailing comma | No trailing commas in argument or parameter lists | `f(1)` |
 | `'single quotes'` | Double quotes only | `"double quotes"` |
@@ -181,22 +190,16 @@ feature elsewhere, and every one of them is a compile error in Vela.
 | Bitwise `& \| ^ ~ << >>` | Not in the vocabulary | `/ % 2` and a boolean, or recursion |
 | `**` | No exponentiation operator | A `for` loop multiplying |
 | `try` / `catch` / `throw` | No exceptions to catch | Validate inputs up front and return a sentinel |
-| `stdin`, `input()`, `read()`, files | `print` is the only I/O | |
-| `Math.random()`, time, env | None | |
+| `input("prompt")` | `read()` takes no arguments | `let s: string = read();` |
+| Files, time, randomness | `print` and `read` are the only I/O | |
 
-Two of these deserve emphasis because they constrain program *design*, not just
-syntax:
+One of these constrains program *design* rather than just syntax:
 
-**No indexing means no character access.** A string can be built up with `+` and
-measured with `len`, but never taken apart. This makes string reversal, case
-conversion, substring search, and per-character processing **impossible**, not
-merely awkward. Don't try to write them; you'll loop forever or produce wrong
-answers.
-
-**No function values.** Function types are constructed by declarations but there
-is no syntax for writing one, so a function can be called by name but never
-stored, passed, or returned. Higher-order functions, callbacks, and function
-tables do not exist. To vary behaviour, branch on a `bool` or an integer tag.
+**No collections.** A string is a sequence rather than a collection: it can be
+indexed with `s[i]` and measured with `len`, and that is all. There is no way to
+hold a list, so anything over a sequence of values has to be flattened into
+`number`s, one variable per slot. See [section 11](#11-standard-library-recipes)
+for what that looks like in practice.
 
 ---
 
@@ -482,12 +485,12 @@ Precedence, loosest to tightest. Each binary level is **left-associative**.
 | 5 | `+` `-` | left |
 | 6 | `*` `/` `%` | left |
 | 7 | unary `-` `!` | right |
-| — | call `f(...)` | left |
-| — | assignment `=` | right |
+| — | call `f(...)`, index `s[i]` | left |
+| — | assignment `=`, compound `+=` `-=` `*=` `/=` `%=` | right |
 
 ```
 expression   ::= assignment
-assignment   ::= identifier "=" assignment | or
+assignment   ::= identifier ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ) assignment | or
 or           ::= and { "||" and }
 and          ::= equality { "&&" equality }
 equality     ::= comparison { ( "==" | "!=" ) comparison }
@@ -495,7 +498,8 @@ comparison   ::= term { ( "<" | "<=" | ">" | ">=" ) term }
 term         ::= factor { ( "+" | "-" ) factor }
 factor       ::= unary { ( "*" | "/" | "%" ) unary }
 unary        ::= ( "-" | "!" ) unary | call
-call         ::= primary { "(" [ expression { "," expression } ] ")" }
+call         ::= primary { ( "(" [ expression { "," expression } ] ")" )
+                        | ( "[" expression "]" ) }
 primary      ::= number | string | "true" | "false"
                | identifier | "(" expression ")"
 ```
@@ -514,6 +518,40 @@ a + 1 = 2;     // error, same
 An assignment is also an expression, so it produces a value. `print(x = 5);`
 prints `5`.
 
+### Compound assignment and increment
+
+Both are **desugared in the parser**, so neither the AST, the checker, nor the
+interpreter knows they exist:
+
+| Written | Becomes |
+| --- | --- |
+| `x += y` | `x = x + y` |
+| `x -= y` | `x = x - y` |
+| `x *= y` | `x = x * y` |
+| `x /= y` | `x = x / y` |
+| `x %= y` | `x = x % y` |
+| `i++` | `i = i + 1` |
+| `i--` | `i = i - 1` |
+
+The payoff is that every type rule comes for free. `n += "a"` reports the ordinary
+`cannot apply '+' to 'number' and 'string'`, and `x /= 0` is the ordinary
+`division by zero` — neither needed a rule of its own. `+=` works on strings,
+because `+` does; the other four are numeric only, for the same reason.
+
+`++` and `--` are **statements, not expressions**, so they have no value:
+
+```vela
+i++;              // correct
+for (...; i++)   // correct: a for update is an expression slot
+let y: number = i++;   // error: '++' is a statement and has no value
+i + j++;          // error: same reason
+```
+
+The one place `--` is ambiguous is prefix position. `--1` is a doubled negation
+and evaluates to `1`, which is the reading the language has always documented; a
+name in front is what makes it a decrement. A statement ends in `;` or a loop
+header's `)`, which is what tells `i--;` from `- -1`.
+
 ### Calls
 
 - Arguments are comma-separated. **No trailing comma**: `f(1,)` is an error.
@@ -524,6 +562,8 @@ prints `5`.
   `!a == b` is `(!a) == b`.
 - Calls chain syntactically (`f(1)(2)` parses) but only a declared function name
   is callable, so the checker rejects the rest with `this is not a function`.
+- Index suffixes share the suffix loop with calls and chain the same way, so
+  `s[0][1]` and `f()[0]` parse.
 
 ### Grouping
 
@@ -535,12 +575,13 @@ override precedence.
 ## 8. Types and static rules
 
 ```
-T ::= "number" | "string" | "bool" | "void"
+T ::= "number" | "string" | "bool" | "void" | "function"
 ```
 
-That is the complete list. There is no `any` in source, no `null`, no unions, no
-subtyping, and no inference. Function types exist internally but you cannot
-write one.
+The first four are primitives. `function` is the odd one out: it names the *shape*
+of a value without naming a signature, and it is what makes it possible to store,
+pass, and return a function at all. There is no `any` in source, no `null`, no
+unions, no generics, and no inference.
 
 ### The rules
 
@@ -569,10 +610,36 @@ print(false && (1 / 0 == 0));   // safe: prints false
 an error. Assignment to a function name is an error: `'fact' is a function and
 cannot be assigned to`.
 
+**The bare `function` type is checked in one direction only.** Any function
+satisfies it, so storing one is checked:
+
+```vela
+fn double(x: number): number { return x * 2; }
+
+let f: function = double;   // correct — a function is a function
+let n: number = 5;
+let g: function = n;        // error: cannot initialise 'g' of type 'function'
+                            //        with a value of type 'number'
+```
+
+But the signature is not recorded, so a call through such a variable cannot be
+checked: no arity check at compile time and no known result type. `f(1, 2, 3)`
+type-checks and then fails at runtime with `'double' expects 1 arguments but got
+3`, and `f()` returning no known type is why `tostring` is so common around one.
+The alternative — a writable signature type like `(number) -> number` — would check
+both, at the cost of a function being storable under only one exact signature, so
+there would be no way to write "a function that takes a number" without also fixing
+its return type at every use. See
+[section 18](#18-design-rationale-and-known-gaps) for the reasoning.
+
 **Redeclaration in the same scope is an error,** with a note pointing at the
 previous declaration. Shadowing in a nested scope is fine.
 
-**Names must be declared before use,** including functions.
+**Functions may be used before they are declared; variables may not.** Every
+`fn` signature in a declaration list is installed before any body in that list is
+checked, so a forward call and a mutually recursive pair both resolve. A `let`
+must still be declared before use, because its type comes from a value that has
+to be computed first.
 
 **Errors stop the pipeline.** A program with any compile error does not run at
 all, so statements before the error never execute. Diagnostics are collected,
@@ -599,8 +666,8 @@ It treats a **loop** as never returning, which is sound but incomplete — see
 
 ## 9. Built-ins
 
-There are exactly **four callable built-ins** plus the `print` statement. There
-is no module system, no import, and no other global name.
+There are exactly **thirteen callable built-ins** plus the `print` statement.
+There is no module system, no import, and no other global name.
 
 | Name | Signature | Behaviour |
 | --- | --- | --- |
@@ -608,6 +675,23 @@ is no module system, no import, and no other global name.
 | `tonumber(s)` | `(any) -> number` | `Number(s)` for a string. Returns `0` for a non-numeric string **and for any non-string argument**. Never fails. |
 | `typeOf(x)` | `(any) -> string` | Returns `"number"`, `"string"`, `"bool"`, `"void"`, `"function"`, or `"native"`. |
 | `len(s)` | `(string) -> number` | UTF-16 code-unit count. A `number` argument is a compile error. |
+| `trunc(x)` | `(number) -> number` | Toward zero, so `trunc(-2.7)` is `-2`. |
+| `floor(x)` | `(number) -> number` | Down, so `floor(-2.7)` is `-3`. |
+| `ceil(x)` | `(number) -> number` | Up, so `ceil(-2.7)` is `-2`. |
+| `round(x)` | `(number) -> number` | Nearest, halves **away from zero**: `round(2.5)` is `3`, `round(-2.5)` is `-3`. |
+| `abs(x)` | `(number) -> number` | `abs(-3)` is `3`. |
+| `min(a, b)` | `(number, number) -> number` | |
+| `max(a, b)` | `(number, number) -> number` | |
+| `idiv(a, b)` | `(number, number) -> number` | Truncates toward zero, like `%`. `idiv(17, 5)` is `3`; `idiv(-17, 5)` is `-3`. Dividing by zero gives `0`. |
+| `read()` | `() -> string` | One line of stdin, with the newline stripped. `""` at end of input. |
+
+The numeric eight are specified rather than approximated, which is the point:
+`trunc` and `idiv` both go toward zero so they agree with `%`, and `round` breaks
+halves away from zero so it is symmetric. `idiv(x, 0)` is `0` rather than an error
+because a built-in has no source location to point at, and `Infinity` is not a
+value this language can hold meaningfully. `sqrt` and `pow` are *not* built-ins;
+they are [recipes](#11-standard-library-recipes), because their exact
+floating-point behaviour is the part that is hard to promise.
 
 ### `tostring` rendering rules
 
@@ -648,6 +732,39 @@ worth knowing if you branch on `typeOf`.
 Shadowing a built-in at **top level** is an error: `'tostring' is already declared
 in this scope`.
 
+### `read` details
+
+`read()` takes no arguments and prints no prompt, so a program that wants a prompt
+prints one itself. One line comes back per call, with the newline stripped, and a
+`\r\n` file does not leave a stray `\r` on every line.
+
+End of input is the empty string, not an error and not a sentinel. There is no
+`null` in Vela to signal it, and an empty line is a real value a program can
+produce, so a loop condition on `line != ""` is how "until the user is done" is
+written:
+
+```vela
+let line: string = read();
+while (line != "") {
+    print(line);
+    line = read();
+}
+```
+
+The input source is indirected through `setInput`, the same way output goes
+through `setOutput`. That is how the tests feed a fixed list of lines instead of a
+pipe, and how the REPL avoids consuming the terminal: readline has already
+buffered stdin by the time an entry runs, so descriptor 0 is empty and re-reading
+it would race the next thing typed. An embedder passes the lines to serve through
+the REPL's `inputLines` option; with none, `read()` is immediately at end of input
+and returns `""`.
+
+Worth knowing when writing a program: the REPL **cannot** be a data-entry point.
+Serving `read()` from the line that ended the entry was the obvious shortcut, and
+it is a trap — `tonumber(read())` would answer with the number in `print(3);`.
+Returning the empty string is the same answer end-of-input gives, and it is
+predictable.
+
 ### `print` details
 
 `print` adds a trailing newline. It accepts `number`, `string`, `bool`, and
@@ -673,7 +790,9 @@ One type, IEEE-754 doubles. Integer and fractional literals are the same type.
 | unary `-` | Numeric negation | `--1` is `1` |
 
 `%` is a remainder, not a mathematical modulus. This matters for negative
-operands — see [`trunc`](#truncation) below for the idiom that depends on it.
+operands: `trunc` and `idiv` are both specified to go toward zero so they agree
+with it, and `oneDecimal` in [section 11](#11-standard-library-recipes) depends
+on it to catch a negative fraction.
 
 ### Strings
 
@@ -700,7 +819,34 @@ also serves `+`.) So strings can be tested for equality but **cannot be sorted o
 ordered** without converting to `number` first, which is not a meaningful
 conversion. The only ordering available is `len(s)`, which is a number.
 
-There is no indexing, no slicing, no search, and no case conversion.
+### Indexing
+
+`s[i]` is the only subscript in the language, and a `string` is the only thing it
+accepts. It reads one UTF-16 code unit and returns a one-code-unit `string`, so
+`len(s[i])` is `1` and the ordinary `string` rules still apply to it.
+
+```vela
+let s: string = "hello";
+print(s[0]);                    // h
+print(s[len(s) - 1]);           // o
+print(s[0] + "|" + s[1]);       // h|e
+```
+
+Valid indices are `0` through `len(s) - 1`. Anything else, negative included, is a
+runtime error, not an empty string:
+
+```
+error: index 5 is out of range for a string of length 2
+```
+
+A `number`, `bool`, or `void` cannot be indexed at all — the checker reports
+`this has type 'number' and cannot be indexed; only a 'string' can`, because a
+string is a sequence and there is no collection to subscript.
+
+`len` counts code units, so a surrogate pair occupies two indices. Reading half of
+an emoji gives a broken character, and there is no code-point iteration to offer
+instead. There is still no case conversion, because characters can be read and
+compared but not mapped to new ones.
 
 ### Booleans
 
@@ -747,17 +893,23 @@ function that falls off the end returns the `void` value, not `null` —
 
 ### Runtime errors
 
-Only three checks remain after type checking:
+Five checks survive type checking:
 
 ```
 division by zero
 remainder by zero
 expected a 'bool' condition, but got 'number'
+index 5 is out of range for a string of length 2
+call depth 750 exceeded
 ```
 
-Plus scope failures that the static check could not rule out (`cannot find 'x' in
-this scope`, `cannot assign to 'x': it is not declared here`) and arity
-re-checks. Everything else is caught before the program starts.
+Only the last two are a consequence of a design decision rather than an ordinary
+mistake. An out-of-range index is undetectable statically because nothing in the
+type system carries a length, and the depth cap replaces a V8 stack overflow with
+a message that names the language's own limit. Plus scope failures that the static
+check could not rule out (`cannot find 'x' in this scope`, `cannot assign to 'x':
+it is not declared here`) and arity re-checks, which matter for a call through a
+`function` value. Everything else is caught before the program starts.
 
 ---
 
@@ -767,79 +919,34 @@ Vela has no standard library. These are the idioms that replace the functions yo
 would otherwise reach for. **All of the code below compiles and runs on the
 current implementation**, with the output shown.
 
-> **Read the recipes in order.** They build on each other: `trunc` comes first and
-> `floor`, `ceil`, `round`, `idiv`, `digits`, and `group` all call it; `abs` comes
-> next and `gcd` and `group` call it. Each snippet is shown in isolation, so
-> copy the whole section in sequence rather than a single block.
+> **Do not redefine the built-ins.** A top-level `fn trunc`, `fn floor`, `fn abs`,
+> `fn min`, `fn idiv`, or `fn read` is a compile error — the same rule that stops
+> you shadowing `tostring` at the top level. The eight numeric built-ins and
+> `read` are in [section 9](#9-built-ins); they are not repeated below.
+>
+> **Read the recipes in order.** They build on each other: `sqrt` and `powInt`
+> come first because `digits` and `group` call them, and `reverse`,
+> `startsWith`, and `substring` are the string primitives the last two use.
+> Each snippet is shown in isolation, so copy the whole section in sequence
+> rather than a single block.
 
-### Truncation
+### Integer exponentiation
 
-The foundation for everything numeric. `x % 1` is the fractional part with the
-sign of `x`, so adding it rounds *toward* zero and subtracting it rounds *away*
-from zero.
+There is no `**` and no `powInt`, so multiplication in a loop is the whole thing.
+A negative exponent gives `0` here, because the loop body never runs — check the
+sign yourself if you care.
 
 ```vela
-fn trunc(x: number): number {
-    if (x >= 0) { return x - (x % 1); }
-    return x + ((0 - x) % 1);
+fn powInt(base: number, e: number): number {
+    let out: number = 1;
+    for (let i: number = 0; i < e; i = i + 1) { out = out * base; }
+    return out;
 }
 ```
 
 ```
-trunc(2.7)  ->  2
-trunc(-2.7) -> -2
-```
-
-### floor and ceil
-
-`trunc` alone is not enough — it truncates toward zero, not toward negative
-infinity.
-
-```vela
-fn floor(x: number): number {
-    let t: number = trunc(x);
-    if (t == x) { return t; }
-    if (x < 0) { return t - 1; }
-    return t;
-}
-
-fn ceil(x: number): number {
-    let t: number = trunc(x);
-    if (t == x) { return t; }
-    if (x > 0) { return t + 1; }
-    return t;
-}
-```
-
-```
-trunc(2.7) floor(2.7) floor(-2.7) ceil(2.1) ceil(-2.1)
-      2           2          -3          3          -2
-```
-
-### Rounding
-
-`round` is half-away-from-zero. Note that `round` is defined in terms of
-`trunc`, and `trunc` is defined in terms of `%` — the whole numeric toolkit
-chains.
-
-```vela
-fn round(x: number): number {
-    if (x >= 0) { return trunc(x + 0.5); }
-    return trunc(x - 0.5);
-}
-```
-
-```
-round(2.5) round(-2.5) round(2.4) round(-2.6)
-       3        -3         2        -3
-```
-
-### abs, min, max
-
-```vela
-fn abs(x: number): number { if (x < 0) { return 0 - x; } return x; }
-fn min(a: number, b: number): number { if (a <= b) { return a; } return b; }
-fn max(a: number, b: number): number { if (a >= b) { return a; } return b; }
+powInt(2, 10) -> 1024
+powInt(7, 0)  -> 1
 ```
 
 ### Square root (Newton's method)
@@ -867,25 +974,6 @@ sqrt(16)         -> 4
 
 60 iterations overshoots the achievable precision, which is what you want: it
 settles into a fixed point and stops.
-
-### Integer exponentiation and integer division
-
-```vela
-fn powInt(base: number, e: number): number {
-    let out: number = 1;
-    for (let i: number = 0; i < e; i = i + 1) { out = out * base; }
-    return out;
-}
-
-fn idiv(a: number, b: number): number { return trunc(a / b); }
-```
-
-```
-powInt(2, 10) -> 1024
-powInt(7, 0)  -> 1
-idiv(17, 5)   -> 3
-idiv(-17, 5)  -> -3     // truncates toward zero, like C
-```
 
 ### GCD
 
@@ -936,29 +1024,20 @@ digits(0) -> 1   digits(7) -> 1   digits(1000) -> 4   digits(-12345) -> 5
 ### Thousands separators
 
 The most involved string-building recipe, and the one that shows the whole
-idiom. Because there is no indexing and no array, digits are extracted with `%`
-and **prepended** to an accumulator, and a separator is prepended whenever the
+idiom. Because there is no collection, digits are extracted with `%` and
+**prepended** to an accumulator, and a separator is prepended whenever the
 placed-digit count hits a multiple of three — but only if digits remain, or you
-get a trailing comma.
+get a trailing comma. The digit-to-character step is one `s[i]` into a lookup
+string, which is what indexing is for.
 
 ```vela
 fn digitChar(d: number): string {
-    if (d == 0) { return "0"; }
-    if (d == 1) { return "1"; }
-    if (d == 2) { return "2"; }
-    if (d == 3) { return "3"; }
-    if (d == 4) { return "4"; }
-    if (d == 5) { return "5"; }
-    if (d == 6) { return "6"; }
-    if (d == 7) { return "7"; }
-    if (d == 8) { return "8"; }
-    if (d == 9) { return "9"; }
-    return "?";
+    return "0123456789"[d];
 }
 
 fn group(n: number): string {
     let neg: bool = n < 0;
-    let x: number = abs(trunc(n));
+    let x: number = trunc(abs(n));
     let out: string = "";
     let pos: number = 0;
     while (x >= 1) {
@@ -974,11 +1053,60 @@ fn group(n: number): string {
 ```
 
 ```
-group(0)         -> 0
-group(7919)      -> 7,919
-group(1234567)   -> 1,234,567
-group(-123456789)-> -123,456,789
-group(100)       -> 100
+group(0)          -> 0
+group(7919)       -> 7,919
+group(1234567)    -> 1,234,567
+group(-123456789) -> -123,456,789
+group(100)        -> 100
+```
+
+### Looking inside a string
+
+`s[i]` returns a one-code-unit `string`, so everything per-character is now a
+loop with `+`. Reversal prepends, a search compares, and a substring is a slice
+assembled one unit at a time.
+
+```vela
+fn reverse(s: string): string {
+    let out: string = "";
+    for (let i: number = 0; i < len(s); i = i + 1) { out = s[i] + out; }
+    return out;
+}
+
+fn startsWith(pre: string, s: string): bool {
+    if (len(pre) > len(s)) { return false; }
+    for (let i: number = 0; i < len(pre); i = i + 1) {
+        if (pre[i] != s[i]) { return false; }
+    }
+    return true;
+}
+
+fn indexOf(needle: string, s: string): number {
+    if (len(needle) > len(s)) { return 0 - 1; }   // sentinel: not found
+    for (let i: number = 0; i + len(needle) <= len(s); i = i + 1) {
+        if (startsWith(needle, substring(s, i, len(needle)))) { return i; }
+    }
+    return 0 - 1;
+}
+
+fn substring(s: string, from: number, count: number): string {
+    let out: string = "";
+    for (let i: number = from; i < from + count; i = i + 1) { out = out + s[i]; }
+    return out;
+}
+```
+
+`substring` comes last on purpose — the other two call it, and forward references
+work now, so the order is a reading convenience rather than a requirement.
+`indexOf` returns `-1` when there is no match, because there is no `null` to
+return.
+
+```
+reverse("abc")            -> cba
+startsWith("hell", "hello")-> true
+substring("hello", 1, 3)  -> ell
+indexOf("ll", "hello")    -> 2
+indexOf("z", "hello")     -> -1
 ```
 
 ### String padding and repetition
@@ -1027,10 +1155,36 @@ oneDecimal(-2.5)    -> -2.5
 oneDecimal(7)       -> 7.0
 ```
 
+### Reading input
+
+`read()` returns one line, and `""` at end of input, so a loop condition on an
+empty line is how "until the user is done" is written. See
+[section 9](#9-built-ins) for why the REPL is not one of the places this works.
+
+```vela
+let count: number = 0;
+let total: number = 0;
+
+let line: string = read();
+while (line != "") {
+    count = count + 1;
+    total = total + len(line);
+    line = read();
+}
+
+if (count == 0) {
+    print("no input");
+} else {
+    print("lines: " + tostring(count));
+    print("average: " + tostring(idiv(total, count)));
+}
+```
+
 ### Recursion
 
 Recursion is the only way to express unbounded data traversal. It costs a stack
-frame per call, so prefer a loop for linear work.
+frame per call, so prefer a loop for linear work. Because signatures are hoisted,
+a mutually recursive pair needs no forward declaration.
 
 ```vela
 fn fact(n: number): number {
@@ -1049,18 +1203,25 @@ fn isPrime(n: number): bool {
     }
     return true;
 }
+
+fn isEven(n: number): bool { return n % 2 == 0; }
+fn isOdd(n: number): bool { return isEven(n) == false; }   // mutual, no forward decl
 ```
 
 ### Things you genuinely cannot write
 
 Do not attempt these; they are impossible, not merely verbose.
 
-- Character-by-character string processing (reverse, upper/lower, per-character
-  search, substring extraction, character comparison) — needs indexing.
-- Anything over a list of values — needs a collection type.
-- Higher-order functions, callbacks, dispatch tables, function composition.
-- Try/catch, error propagation, exception types.
-- File, network, time, randomness, or stdin access.
+- Case conversion. Characters can be read and compared but not mapped to new
+  ones, so there is no `upper` or `lower` to write. `for` over the ASCII
+  letters with an `if` per character is a 52-branch table, not a function.
+- Anything over a list of values — needs a collection type. A string is a
+  sequence, not a container.
+- Dispatch tables and function composition. A `function` value holds no
+  signature, so there is nothing to build a table out of and nothing to inspect.
+- Try/catch, error propagation, exception types. Validate up front and return a
+  documented sentinel: `-1` for "not found", `0` for "division by zero".
+- File, network, time, or randomness access. `print` and `read` are the only I/O.
 
 The workaround pattern for all of them is the same: **flatten the data into
 `number`s and loop.** Encode a set of records as a base-256 integer, or write one
@@ -1259,46 +1420,82 @@ A sieve is out of reach without arrays; trial division is the substitute.
 
 ### strings.vela — the full string surface
 
-Everything a string can do: concatenate, compare, escape, measure.
+Everything a string can do: concatenate, compare, escape, measure, and index.
+Indexing is the point, so the file spends its length on character work:
 
 ```vela
-fn repeat(s: string, times: number): string {
-    let out: string = "";
-    for (let i: number = 0; i < times; i = i + 1) {
-        out = out + s;
+// A positional comparison: equal length, then the same character at every index.
+fn sameCharacters(a: string, b: string): bool {
+    if (len(a) != len(b)) { return false; }
+    for (let i: number = 0; i < len(a); i = i + 1) {
+        if (a[i] != b[i]) { return false; }
     }
-    return out;
+    return true;
 }
 
-fn pad(s: string, width: number): string {
-    let out: string = s;
-    while (len(out) < width) {
-        out = out + ".";
+// A real anagram test needs order-independence, which means counting.
+fn countIn(s: string, c: string): number {
+    let n: number = 0;
+    for (let i: number = 0; i < len(s); i = i + 1) {
+        if (s[i] == c) { n = n + 1; }
     }
-    return out;
+    return n;
 }
 ```
 
-### temperature.vela — building `floor` and `round` from `%`
+`greeting[0]` is `"h"`, so `len(greeting[0])` is `1` and `greeting[0] + "!"` is
+`"h!"`. The file prints all of it, and its `.expected` is compared against the
+real output.
 
-The best single study in the language. `/` always produces a fraction and there
-is no `floor`, so the file reconstructs the missing numeric operations:
+### temperature.vela — formatting a number you did not choose
+
+The best single study in the language. Pure functions over `number`, then
+formatting for display with the built-ins:
 
 ```vela
-fn trunc(x: number): number {
-    if (x >= 0) { return x - (x % 1); }
-    return x + ((0 - x) % 1);
-}
-
-fn round(x: number): number {
-    if (x >= 0) { return trunc(x + 0.5); }
-    return trunc(x - 0.5);
-}
-
-fn idiv(a: number, b: number): number {
-    return trunc(a / b);
+fn oneDecimal(value: number): string {
+    let tenths: number = round(value * 10);
+    let whole: number = idiv(tenths, 10);
+    let fraction: number = tenths % 10;
+    if (fraction < 0) { fraction = 0 - fraction; }
+    return tostring(whole) + "." + tostring(fraction);
 }
 ```
+
+This file used to carry hand-written copies of `trunc`, `round`, and `idiv`,
+because the language had no numeric built-ins. It does not any more — and could
+not, since a top-level `fn trunc` is a compile error.
+
+### callbacks.vela — function values
+
+Storing a function in a `function`-typed variable, passing one as an argument,
+and reassigning it:
+
+```vela
+fn double(x: number): number { return x * 2; }
+
+let f: function = double;
+print(applyToText(f, 21));   // f(21) = 42
+f = square;
+print(applyToText(f, 21));   // f(21) = 441
+```
+
+The file also works through the cost of the bare type: `op(x)` has type `any`
+because the signature was not recorded, so the helper converts it with
+`tostring` and says so.
+
+### linecount.vela — reading stdin
+
+The only example that reads input, so it runs with a `.input` sibling that
+`check-examples` feeds to it:
+
+```console
+$ vela run examples/linecount.vela < examples/linecount.input
+```
+
+The summary is held in five `number`s and no string is ever stored, because a
+summary never needs the values themselves. That turns out to be the natural way
+to write it: with no collections, the accumulation *is* the algorithm.
 
 ### Nested declarations
 
@@ -1668,21 +1865,26 @@ $ npm run check-examples   # type-check and run every examples/*.vela
 $ npm run build            # emit dist/
 ```
 
-`npm test` runs ~280 cases across six files:
+`npm test` runs ~385 cases across seven files:
 
 | File | Covers |
 | --- | --- |
 | `test/lexer.test.ts` | Token kinds, positions, escapes, error recovery |
 | `test/parser.test.ts` | Grammar acceptance and rejection, precedence, associativity |
 | `test/checker.test.ts` | Type rules, scoping, return analysis, diagnostics |
-| `test/interpreter.test.ts` | Runtime semantics, scoping, built-ins |
-| `test/pipeline.test.ts` | Stage ordering, stage stopping, error recovery |
-| `test/cli.test.ts` | Argument parsing, exit codes, output rendering |
+| `test/interpreter.test.ts` | Runtime semantics, scoping, built-ins, indexing, `read()` |
+| `test/pipeline.test.ts` | Stage ordering, stage stopping, error recovery, the REPL |
+| `test/cli.test.ts` | Argument parsing, exit codes, output rendering, real stdin |
+| `test/install-skill.test.ts` | Every `vela` block in `docs/vela.SKILL.md` compiles, and each `// error:` block still fails |
 
 **`npm run check-examples` is the test that matters most.** Every `*.vela` file
 in `examples/` is type-checked and executed for real, so an example that stops
 compiling — or a compiler regression — fails there. Files in `examples/invalid/`
-are deliberately excluded.
+are deliberately excluded. A program with a sibling `<name>.input` has those lines
+fed to its `read()` calls, and a sibling `<name>.expected` is compared against the
+real output, so an example's *output* is asserted rather than just its exit code.
+That matters for `examples/strings.vela` in particular: a `for` loop that never
+runs also exits 0.
 
 Capture output with `setOutput`:
 
@@ -1703,22 +1905,58 @@ assert.deepEqual(lines, ["expected output"]);
 
 ### Why the restrictions exist
 
-Each missing feature was a deliberate cut, and the reasoning is consistent:
-**accept only what the type system can fully describe.**
+Most of the early cuts came from one rule: **accept only what the type system can
+fully describe.** Four features have since been added, and the reasoning behind
+each is worth recording, because three of them relax that rule in a specific and
+deliberate way.
 
-- **No indexing, no arrays.** Nothing in the type system has an element type, so
-  `a[i]` could never type-check. Supporting the syntax would mean accepting a
-  construct that could not be checked.
-- **No `floor`, `round`, or integer division.** Rather than guess, the language
-  leaves them out and `examples/temperature.vela` builds them from `%`, which
-  makes the `%` semantics the learner has to understand.
-- **No function values.** Function types are constructed by declarations but
-  there is no syntax to write one, so a function can be called by name but not
-  stored or passed. Half-supporting this would have produced a type system with a
-  hole in it.
-- **No forward references.** Declaring before use makes "is this name in scope
-  here?" a question with a one-word answer, which is what keeps the checker's
-  error messages precise.
+**`s[i]` — indexing a string, but not a collection.** The original cut was on
+*collections*: nothing in the type system has an element type, so an `a[i]` over
+some container could never type-check. A string is different. It already exists as
+a value, `len` already describes its length, and reading one code unit out of it
+returns another `string` — so the whole construct is describable without a new type
+concept. That made it possible to add indexing without adding a collection type.
+`n[0]` is still a type error, and the diagnostic says why.
+
+**`trunc`, `floor`, `ceil`, `round`, `abs`, `min`, `max`, `idiv`.** These were
+originally left out on the grounds that guessing rounding behaviour would be worse
+than omitting it. The resolution was to specify each one exactly rather than
+approximate it: `trunc` and `idiv` toward zero, `round` halves away from zero,
+`idiv(x, 0)` is `0`. Specified semantics beat no semantics. `sqrt` and `pow` are
+still recipes rather than built-ins, because their exact floating-point behaviour
+is the part that is genuinely hard to promise.
+
+**Forward references and mutual recursion.** Declaring before use made "is this
+name in scope here?" a question with a one-word answer, which is what kept the
+checker's messages precise. Hoisting function *signatures* per declaration list
+preserves that: the question still has a one-word answer at the start of each
+body, and the only names that appear early are the ones whose signatures are
+already known. Variables are not hoisted, because a variable's type comes from a
+value that has to be computed first.
+
+**Function values, and what the bare `function` type gives up.** The bare type is
+the one place where the "fully describe it" rule is knowingly bent. `function`
+records *that* a function is stored but not which signature, so a call through one
+is unchecked: no arity check at compile time, and no known result type. The
+alternative was a written signature type such as `(number) -> number`, which would
+check both but would mean a function is storable under only one exact signature —
+so passing `double` to something expecting `fn(string) -> number` could not be
+expressed at all, and callbacks would need a type per shape. The bare type trades
+precision at the call site for the ability to pass a function around at all. A
+call that gets the arity wrong still fails at runtime, with a message naming the
+function that was actually called.
+
+The remaining restrictions still stand on the original rule:
+
+- **No collections.** A `string` is a sequence, not a collection. Nothing has an
+  element type, so there is no way to declare a list of `number` and index it.
+  Data that varies in length has to be flattened into named `number` variables, or
+  processed a value at a time.
+- **No `sqrt`, `pow`, or a string library.** `s.upper()`, `s.split()`, and
+  `s.replace()` need a character-to-character mapping, and reading a character is
+  not the same as being able to produce one. With `s[i]` there is now a way to
+  *read* every character, but still no way to *map* it, so a substitution table
+  would be a chain of `if` statements over every character you care about.
 
 ### Known limitations
 
@@ -1752,17 +1990,23 @@ as it is across several in a file.
 **`typeOf` can return `"native"`,** which the README does not mention. This is
 correct — built-ins are values — but surprising.
 
-**The lexer accepts `\'`,** which `docs/grammar.md` omits from its escape list.
+**`read()` cannot be used in the REPL.** Readline owns the terminal and has
+buffered stdin before an entry runs, so `read()` is at end of input there. An
+embedder that wants it to work passes `inputLines` to the REPL. This is a property
+of the tool, not the language, but it is the one place a program that reads input
+behaves differently from the same program in a file.
 
 **Numbers are unbounded doubles.** `1e400` becomes `Infinity` with no diagnostic.
 
-**No recursion depth limit** is enforced beyond what the host runtime provides.
+**Recursion depth is capped at 750 calls,** which is a runtime error rather than a
+V8 stack overflow — an interpreted frame costs several host frames, and the host
+limit is a number that would change with the runtime rather than the language.
 
 ### Not in this version
 
-Arrays and collections · user-defined types, generics, modules · forward and
-mutual function references · bytecode compilation · `floor`, `round`, and integer
-division.
+Arrays and collections · user-defined types, generics, modules · a writable
+function type · bytecode compilation · `sqrt` and `pow` · ordering on `string`
+and `bool` · code-point iteration.
 
 ---
 
@@ -1776,20 +2020,25 @@ Before calling a `.vela` program correct, verify each of these:
 - [ ] No variable has type `void`.
 - [ ] Every `if` / `while` / `for` condition is a `bool` expression — a
       comparison, a `bool` variable, or a `&&`/`||` of those.
-- [ ] No `x++`, `x += 1`, ternary, trailing comma, single-quoted string, or
-      indexing anywhere.
+- [ ] No ternary, trailing comma, single-quoted string, bitwise operator, or
+      `try` anywhere.
+- [ ] Every `x++` / `x--` is a statement or a `for` update, never inside a larger
+      expression.
+- [ ] Every index is in `0 .. len(s) - 1`, or it is a runtime error waiting to
+      happen.
 - [ ] Every number meeting a string goes through `tostring`.
 - [ ] Every string meeting a number goes through `tonumber`.
 - [ ] Every binary `+` has two operands of the **same** type.
 - [ ] Every comparison has two operands of the **same** type.
-- [ ] Every function is declared before its first use, including recursive
-      helpers used by a function declared above them.
+- [ ] Every variable is declared before it is used. Functions are exempt —
+      signatures are hoisted, so a forward or mutual call is fine.
 - [ ] Every non-`void` function ends with a `return` that the checker will
       accept — add a trailing return if any earlier return is inside a loop.
 - [ ] `break` and `continue` are inside a loop; `return` is inside a function.
 - [ ] No division or remainder by a value that can be zero, or the division is
       guarded by short-circuit `&&`.
 - [ ] `print` is used as a statement, never as a value, and never given a `void`.
+- [ ] Every `read()` result is checked for `""` if the program loops on input.
 - [ ] The program was actually run: `vela run file.vela` exited `0`.
 
 Then confirm the mental model against

@@ -117,7 +117,35 @@ test("the stub's frontmatter is what the Agent Skills specification requires", (
   assert.match(meta.name, /^[a-z0-9]+(-[a-z0-9]+)*$/);
   assert.ok(meta.description.length > 0, "description is required, and is the only thing a loader sees up front");
   assert.ok(meta.description.length <= 1024, "the specification caps description at 1024 characters");
-  assert.ok(meta.version.length > 0);
+});
+
+test("the installed version comes from package.json, and nowhere else", () => {
+  const source = readSource();
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as { version: string };
+  assert.equal(
+    source.version,
+    pkg.version,
+    "a second copy of the version would report every user's install as outdated after a release",
+  );
+
+  // Guard the specific way the duplication came back in the first time.
+  const head = readFileSync(join(root, "docs", "vela.SKILL.md"), "utf8").split("\n---\n")[0] ?? "";
+  assert.ok(
+    !/^\s*version:/m.test(head),
+    "the stub's frontmatter must not record a version; package.json owns it",
+  );
+});
+
+test("the stamped version is the one --list compares against", () => {
+  const { targets, source } = sandbox();
+  const target = find(targets, "agents");
+  applyTarget(target, source, quiet);
+  const text = readFileSync(target.path, "utf8");
+  assert.ok(
+    text.includes(`vela-skill-install: "${source.version}"`),
+    "the installed file must be stamped with the release version",
+  );
+  assert.equal(drift(target, source.version), "current");
 });
 
 test("every target that installs a skill names it after the skill", () => {
@@ -244,11 +272,11 @@ test("an outdated copy is reported as such and repaired on the next install", ()
   const { targets, source } = sandbox();
   const target = find(targets, "agents");
   applyTarget(target, source, quiet);
-  writeFileSync(target.path, readFileSync(target.path, "utf8").replace(source.meta.version, "0.0.1"));
+  writeFileSync(target.path, readFileSync(target.path, "utf8").replace(source.version, "0.0.1"));
 
-  assert.equal(drift(target, source.meta.version), "outdated");
+  assert.equal(drift(target, source.version), "outdated");
   assert.equal(applyTarget(target, source, quiet).status, "updated");
-  assert.equal(drift(target, source.meta.version), "current");
+  assert.equal(drift(target, source.version), "current");
 });
 
 test("a file vela did not write is a conflict, and --force is required", () => {

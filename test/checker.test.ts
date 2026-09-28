@@ -139,6 +139,33 @@ describe("checker: accepted programs", () => {
     expectError("tostring();", /expected 1 argument but got 0/);
     expectError("tostring(1, 2);", /expected 1 argument but got 2/);
   });
+
+  it("type-checks the numeric built-ins from the shared table", () => {
+    expectOk("let a: number = trunc(2.7);\nlet b: number = floor(2.7);\nlet c: number = ceil(2.7);\nlet d: number = round(2.5);\nlet e: number = abs(0 - 1);\nlet f: number = min(1, 2);\nlet g: number = max(1, 2);\nlet h: number = idiv(7, 2);");
+  });
+
+  it("rejects a non-number argument to a numeric built-in", () => {
+    expectError("let a: number = trunc(\"2.7\");", /argument 1 has type 'string' but 'number' was expected/);
+    expectError("let a: number = min(\"1\", 2);", /argument 1 has type 'string' but 'number' was expected/);
+  });
+
+  it("checks arity on the numeric built-ins", () => {
+    expectError("let a: number = idiv(1);", /expected 2 arguments but got 1/);
+    expectError("let a: number = abs(1, 2);", /expected 1 argument but got 2/);
+  });
+
+  it("does not treat print as a callable", () => {
+    // `print` is a keyword and was removed from the built-in table, so there is
+    // no signature the language cannot express. It fails in the parser, not the
+    // checker, which is why this asserts on the diagnostics rather than using
+    // expectError's single-error assumption.
+    const messages = checkSource("let a: number = print(1);").map((d) => d.message);
+    assert.ok(messages.length > 0, "print in an expression position must be rejected");
+    assert.ok(
+      messages.every((m) => /print|expression/.test(m)),
+      `expected a parse error naming print, got: ${messages.join("; ")}`,
+    );
+  });
 });
 
 describe("checker: name resolution", () => {
@@ -171,8 +198,97 @@ describe("checker: name resolution", () => {
     expectError("fn f(a: number, a: number): void { }", /duplicate parameter 'a'/);
   });
 
-  it("rejects calling a function before it is declared", () => {
-    expectError("let x: number = f(1);\nfn f(a: number): number { return a; }", /cannot find 'f'/);
+  it("accepts a call to a function declared later", () => {
+    // Signatures are hoisted before any body is checked, so a forward call
+    // resolves. The interpreter already hoisted the declaration, so this
+    // agreement is the point: what type-checks is what runs.
+    expectOk("let x: number = f(1);\nfn f(a: number): number { return a; }");
+  });
+
+  it("accepts mutual recursion", () => {
+    expectOk(`
+      fn isEven(n: number): bool {
+        if (n == 0) { return true; }
+        return isOdd(n - 1);
+      }
+      fn isOdd(n: number): bool {
+        if (n == 0) { return false; }
+        return isEven(n - 1);
+      }
+      let r: bool = isEven(10);
+    `);
+  });
+
+  it("accepts mutual recursion between siblings inside a block", () => {
+    expectOk(`
+      fn outer(): number {
+        fn a(n: number): number { if (n == 0) { return 0; } return b(n - 1); }
+        fn b(n: number): number { if (n == 0) { return 1; } return a(n - 1); }
+        return a(4);
+      }
+    `);
+  });
+
+  it("accepts storing a function in a `function`-typed variable", () => {
+    expectOk("fn d(x: number): number { return x; }\nlet f: function = d;");
+    expectOk("fn g(): string { return \"\"; }\nlet f: function = g;");
+  });
+
+  it("accepts a function-typed parameter and return", () => {
+    expectOk(`
+      fn d(x: number): number { return x; }
+      fn apply(cb: function, n: number): function { return cb; }
+      let out: function = apply(d, 1);
+    `);
+  });
+
+  it("rejects storing a non-function in a `function`-typed variable", () => {
+    expectError("let f: function = 5;", /of type 'function' with a value of type 'number'/);
+  });
+
+  it("types s[i] as a string", () => {
+    expectOk(`let s: string = "ab"; let c: string = s[0];`);
+    expectOk(`let s: string = "ab"; print(s[0] + "!");`);
+  });
+
+  it("rejects indexing a non-string", () => {
+    expectError("let n: number = 1;\nprint(n[0]);", /cannot be indexed/);
+    expectError("let b: bool = true;\nprint(b[0]);", /cannot be indexed/);
+  });
+
+  it("rejects a non-number index", () => {
+    expectError(`let s: string = "ab";\nprint(s["x"]);`, /a string index has type 'string'/);
+    expectError(`let s: string = "ab";\nprint(s[true]);`, /a string index has type 'bool'/);
+  });
+
+  it("passes a bare function value through another bare function value", () => {
+    expectOk("fn d(x: number): number { return x; }\nlet f: function = d;\nlet g: function = f;");
+  });
+
+  it("does not check a call through a `function`-typed variable", () => {
+    // The documented cost of the bare type: the signature is not recorded, so the
+    // arity and return type at this call site cannot be verified.
+    expectOk("fn d(x: number): number { return x; }\nlet f: function = d;\nlet n: number = f(1);");
+  });
+
+  it("still reports calling a non-function", () => {
+    expectError("let n: number = 1;\nn();", /this is not a function/);
+  });
+
+  it("checks a hoisted function's body against its own signature", () => {
+    // Hoisting must not lose the signature: the body is still checked against it,
+    // so a bad return is still reported even though the name resolved early.
+    expectError("fn f(): number { return true; }", /this return has type 'bool' but 'f' returns 'number'/);
+  });
+
+  it("still rejects a duplicate function declaration", () => {
+    expectError("fn f(): number { return 1; }\nfn f(): number { return 2; }", /already declared/);
+  });
+
+  it("still rejects a variable used before its declaration", () => {
+    // Only functions hoist. A variable's type comes from a value that has to be
+    // computed, so `later` genuinely does not exist yet.
+    expectError("fn f(): number { return later; }\nlet later: number = 1;", /cannot find 'later'/);
   });
 
   it("rejects assigning to a function name", () => {

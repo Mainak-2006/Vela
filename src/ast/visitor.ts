@@ -16,6 +16,7 @@ import type {
   BooleanLiteral,
   BreakStatement,
   CallExpression,
+  IndexExpression,
   ContinueStatement,
   Expression,
   ExpressionStatement,
@@ -58,6 +59,7 @@ export interface NodeVisitor<T> {
   logical(node: LogicalExpression): T;
   assignment(node: AssignmentExpression): T;
   call(node: CallExpression): T;
+  index(node: IndexExpression): T;
 }
 
 export function visit<T>(node: Program, visitor: NodeVisitor<T>): T;
@@ -118,6 +120,8 @@ export function visit<T>(
       return visitor.assignment(node);
     case "call":
       return visitor.call(node);
+    case "index":
+      return visitor.index(node);
     default: {
       const exhaustive: never = node;
       return exhaustive;
