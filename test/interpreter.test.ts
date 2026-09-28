@@ -7,7 +7,7 @@ import { parse } from "../src/parser/parser.js";
 import { check } from "../src/types/checker.js";
 import { Environment } from "../src/runtime/environment.js";
 import { Interpreter, RuntimeError, createGlobalEnvironment } from "../src/runtime/interpreter.js";
-import { displayValue, setOutput } from "../src/runtime/values.js";
+import { displayValue, setInput, setOutput } from "../src/runtime/values.js";
 import type { Value } from "../src/runtime/values.js";
 
 /**
@@ -40,6 +40,35 @@ function run(text: string): { output: string[]; env: Environment } {
 /** Run and return just the printed lines joined, for concise assertions. */
 function printed(text: string): string {
   return run(text).output.join("\n");
+}
+
+/**
+ * Run a program with `read()` fed from a fixed list of lines instead of stdin.
+ * The source is the same indirection the REPL uses, so this exercises the real
+ * path rather than a test-only branch.
+ */
+function withInput(lines: readonly string[], text: string): string {
+  const source = new SourceFile("<test>", text);
+  const bag = new DiagnosticBag();
+  const program = parse(tokenize(source, bag), bag);
+  check(program, bag);
+  assert.deepEqual(
+    bag.errors().map((d) => d.message),
+    [],
+    `program should compile cleanly: ${text}`,
+  );
+
+  const output: string[] = [];
+  const queue = [...lines];
+  const restoreOutput = setOutput((line) => output.push(line));
+  const restoreInput = setInput(() => (queue.length > 0 ? queue.shift()! : ""));
+  try {
+    new Interpreter(createGlobalEnvironment()).run(program);
+  } finally {
+    restoreInput();
+    restoreOutput();
+  }
+  return output.join("\n");
 }
 
 /** Compile without checking, to test the interpreter's runtime backstops. */
@@ -177,6 +206,41 @@ describe("interpreter: functions", () => {
     );
   });
 
+  it("reports runaway recursion as a RuntimeError rather than a host RangeError", () => {
+    // Without the depth guard this escapes as an uncatchable V8 stack overflow,
+    // which bypasses every RuntimeError handler and blames the host.
+    assert.throws(
+      () => runUnchecked("fn forever(n: number): number { return forever(n + 1); }\nprint(tostring(forever(0)));"),
+      (error: unknown) => {
+        assert.ok(error instanceof RuntimeError, `expected a RuntimeError, got ${String(error)}`);
+        assert.match((error as RuntimeError).message, /maximum call depth exceeded/);
+        return true;
+      },
+    );
+  });
+
+  it("recovers the call depth after a throw so later calls still work", () => {
+    // The counter is decremented in a `finally`; if it were not, one failure
+    // would permanently poison the interpreter.
+    const source = new SourceFile(
+      "<test>",
+      "fn boom(n: number): number { return boom(n + 1); }\nprint(tostring(boom(0)));",
+    );
+    const bag = new DiagnosticBag();
+    const program = parse(tokenize(source, bag), bag);
+    const restore = setOutput(() => {});
+    const interpreter = new Interpreter(createGlobalEnvironment());
+    try {
+      assert.throws(() => interpreter.run(program), RuntimeError);
+      assert.throws(() => interpreter.run(program), RuntimeError);
+    } finally {
+      restore();
+    }
+    // A fresh interpreter on a separate environment still works, and a real
+    // call at depth one is unaffected by the guard having fired.
+    assert.equal(printed("fn two(): number { return 2; }\nprint(tostring(two()));"), "2");
+  });
+
   it("captures the defining scope in a closure", () => {
     assert.equal(
       printed("fn outer(n: number): void { let g: number = n; }\nfn f(): number { return 1; }\nprint(f());"),
@@ -200,6 +264,181 @@ describe("interpreter: functions", () => {
       printed("fn f(): number { return 1; }\n{ fn f(): number { return 2; } print(f()); }\nprint(f());"),
       "2\n1",
     );
+  });
+});
+
+describe("interpreter: compound assignment and increment", () => {
+  it("applies each compound operator to a number", () => {
+    assert.equal(
+      printed(`
+        let x: number = 10;
+        x += 5; print(x);
+        x -= 3; print(x);
+        x *= 2; print(x);
+        x /= 4; print(x);
+        x %= 4; print(x);
+      `),
+      "15\n12\n24\n6\n2",
+    );
+  });
+
+  it("concatenates with += on a string", () => {
+    assert.equal(printed(`let s: string = "ab"; s += "cd"; s += "ef"; print(s);`), "abcdef");
+  });
+
+  it("increments and decrements as statements", () => {
+    assert.equal(
+      printed(`
+        let n: number = 5;
+        n++;
+        print(n);
+        n--;
+        n--;
+        print(n);
+      `),
+      "6\n4",
+    );
+  });
+
+  it("runs a for loop whose update is i++", () => {
+    assert.equal(
+      printed(`for (let i: number = 0; i < 4; i++) { print(tostring(i)); }`),
+      "0\n1\n2\n3",
+    );
+  });
+
+  it("runs a for loop whose update is i--", () => {
+    assert.equal(
+      printed(`for (let i: number = 3; i > 0; i--) { print(tostring(i)); }`),
+      "3\n2\n1",
+    );
+  });
+
+  it("runs a function stored in a variable", () => {
+    assert.equal(
+      printed(`
+        fn double(x: number): number { return x * 2; }
+        let f: function = double;
+        print(tostring(f(21)));
+      `),
+      "42",
+    );
+  });
+
+  it("reassigns a function value and calls the new one", () => {
+    assert.equal(
+      printed(`
+        fn double(x: number): number { return x * 2; }
+        fn negate(x: number): number { return 0 - x; }
+        let f: function = double;
+        print(tostring(f(3)));
+        f = negate;
+        print(tostring(f(3)));
+      `),
+      "6\n-3",
+    );
+  });
+
+  it("passes a function as an argument and returns one", () => {
+    assert.equal(
+      printed(`
+        fn double(x: number): number { return x * 2; }
+        fn callIt(cb: function, n: number): string { return "value " + tostring(n); }
+        fn giveBack(cb: function): function { return cb; }
+        print(callIt(double, 5));
+        let again: function = giveBack(double);
+        print(tostring(again(8)));
+      `),
+      "value 5\n16",
+    );
+  });
+
+  it("reads one code unit at a time", () => {
+    assert.equal(
+      printed(`
+        let s: string = "hello";
+        print(s[0]);
+        print(s[4]);
+        print(s[0] + "|" + s[1]);
+      `),
+      "h\no\nh|e",
+    );
+  });
+
+  it("walks a string with len and an index", () => {
+    assert.equal(
+      printed(`
+        let s: string = "abc";
+        for (let i: number = 0; i < len(s); i = i + 1) { print(s[i]); }
+        print(s[len(s) - 1]);
+      `),
+      "a\nb\nc\nc",
+    );
+  });
+
+  it("reports an out-of-range index at runtime", () => {
+    assert.throws(() => run(`let s: string = "ab";\nprint(s[5]);`), /index 5 is out of range/);
+    assert.throws(() => run(`let s: string = "ab";\nprint(s[0 - 1]);`), /index -1 is out of range/);
+    assert.throws(() => run(`let s: string = "ab";\nprint(s[2]);`), /out of range/);
+  });
+
+  it("reads a line from the input source", () => {
+    assert.equal(withInput(["vela", "21"], `let a: string = read(); print(a);`), "vela");
+    assert.equal(
+      withInput(["7"], "let n: number = tonumber(read()); print(tostring(n * 2));"),
+      "14",
+    );
+  });
+
+  it("returns the empty string at end of input", () => {
+    // No `null` in Vela, so an empty string is the only honest end-of-input
+    // answer. A program reading past the end should stop cleanly, not fail.
+    assert.equal(withInput([], "print(\"[\" + read() + \"]\");"), "[]");
+    assert.equal(withInput(["a"], "print(read()); print(\"[\" + read() + \"]\");"), "a\n[]");
+  });
+
+  it("returns the empty string for a blank input line", () => {
+    assert.equal(withInput([""], "print(\"[\" + read() + \"]\");"), "[]");
+  });
+
+  it("does not turn end of input into a runtime error", () => {
+    assert.doesNotThrow(() => withInput([], "let s: string = read(); print(s);"));
+  });
+
+  it("reads lines until the end of input", () => {
+    // A fixed-count read loop, the shape an echo server or a batch filter uses.
+    assert.equal(
+      withInput(["3", "alpha", "beta", "gamma"], `
+        let n: number = tonumber(read());
+        for (let i: number = 0; i < n; i = i + 1) {
+            print(tostring(i + 1) + ": " + read());
+        }
+      `),
+      "1: alpha\n2: beta\n3: gamma",
+    );
+  });
+
+  it("echoes until the input runs out", () => {
+    // Reads one more time than there are lines, which is the end-of-input case.
+    assert.equal(
+      withInput(["x", "y"], `
+        let line: string = read();
+        while (line != "") {
+            print(line);
+            line = read();
+        }
+        print("done");
+      `),
+      "x\ny\ndone",
+    );
+  });
+
+  it("keeps a doubled minus as a negation", () => {
+    assert.equal(printed("print(tostring(--1)); print(tostring(---1));"), "1\n-1");
+  });
+
+  it("still reports division by zero from /=", () => {
+    assert.throws(() => run("let x: number = 1; x /= 0;"), /division by zero/);
   });
 });
 
@@ -326,6 +565,41 @@ describe("interpreter: built-ins", () => {
 
   it("leaves built-ins callable from inside a function", () => {
     assert.equal(printed('fn show(n: number): void { print(tostring(n)); }\nshow(5);'), "5");
+  });
+
+  it("truncates toward zero, so negatives lose the fraction downwards", () => {
+    assert.equal(printed("print(tostring(trunc(2.7)));\nprint(tostring(trunc(-2.7)));"), "2\n-2");
+  });
+
+  it("rounds a floor down and a ceil up, including for negatives", () => {
+    assert.equal(printed("print(tostring(floor(2.7)));\nprint(tostring(floor(-2.7)));"), "2\n-3");
+    assert.equal(printed("print(tostring(ceil(2.1)));\nprint(tostring(ceil(-2.7)));"), "3\n-2");
+  });
+
+  it("rounds halves away from zero rather than to even", () => {
+    // Math.round would give 2 here. The documented recipe is half away from
+    // zero, and the built-in has to match the recipe it replaced.
+    assert.equal(printed("print(tostring(round(2.5)));\nprint(tostring(round(-2.5)));"), "3\n-3");
+  });
+
+  it("leaves a whole number alone in trunc, floor, and ceil", () => {
+    assert.equal(printed("print(tostring(floor(3)));\nprint(tostring(ceil(3)));\nprint(tostring(round(3)));"), "3\n3\n3");
+  });
+
+  it("takes the absolute value", () => {
+    assert.equal(printed("print(tostring(abs(0 - 3)));\nprint(tostring(abs(3)));"), "3\n3");
+  });
+
+  it("picks the smaller and larger of two numbers", () => {
+    assert.equal(printed("print(tostring(min(2, 7)));\nprint(tostring(max(2, 7)));"), "2\n7");
+  });
+
+  it("divides integers toward zero, matching the sign rule of '%'", () => {
+    assert.equal(printed("print(tostring(idiv(17, 5)));\nprint(tostring(idiv(-17, 5)));"), "3\n-3");
+  });
+
+  it("returns 0 from idiv rather than failing on a zero divisor", () => {
+    assert.equal(printed("print(tostring(idiv(1, 0)));"), "0");
   });
 });
 

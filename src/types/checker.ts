@@ -41,6 +41,7 @@ import type {
   ForStatement,
   FunctionDeclaration,
   IfStatement,
+  IndexExpression,
   LogicalExpression,
   NumberLiteral,
   PrintStatement,
@@ -55,6 +56,7 @@ import type {
 import { visit, type NodeVisitor } from "../ast/visitor.js";
 import { BUILTIN_SPECS } from "../runtime/values.js";
 import {
+  anyType,
   boolType,
   errorType,
   functionType,
@@ -62,6 +64,7 @@ import {
   isAssignable,
   isComparisonOperator,
   isEqualityOperator,
+  isError,
   numberType,
   primitiveType,
   stringType,
@@ -128,6 +131,12 @@ class Checker implements NodeVisitor<Type> {
   private currentReturn: Type | null = null;
   /** Innermost function declaration, for naming the function in messages. */
   private currentFunction: string | null = null;
+  /**
+   * Offsets of function declarations whose signature is already installed by
+   * hoisting. Keyed on the declaration's own location so that a nested re-entry
+   * into the same node is still recognised as hoisted.
+   */
+  private readonly hoisted = new Set<number>();
 
   constructor(
     private readonly bag: DiagnosticBag,
@@ -155,7 +164,42 @@ class Checker implements NodeVisitor<Type> {
   }
 
   checkProgram(program: Program): void {
+    this.hoistFunctions(program.declarations);
     for (const declaration of program.declarations) this.visitDeclaration(declaration);
+  }
+
+  /**
+   * Install every function's signature in this scope before any body is checked.
+   *
+   * This is what makes a forward reference and mutual recursion work: when `isEven`
+   * calls `isOdd` in its body, `isOdd`'s signature is already visible, so the name
+   * resolves. The interpreter has always supported this at runtime — a function
+   * declaration is hoisted there too — so the two passes are also what keeps the
+   * checker's verdict and the runtime's behaviour in agreement.
+   *
+   * `let` declarations are deliberately not hoisted. A variable's type comes from
+   * its initialiser, which is a value that has to be computed, so using one before
+   * it appears is a genuine error rather than a missing lookup.
+   */
+  private hoistFunctions(declarations: readonly Declaration[]): void {
+    for (const declaration of declarations) {
+      if (declaration.kind !== "fnDecl") continue;
+      this.hoisted.add(declaration.location.offset);
+      this.declare(
+        declaration.name,
+        this.signatureOf(declaration),
+        "function",
+        declaration.nameLocation,
+      );
+    }
+  }
+
+  /** The declared signature of a function, as a `FunctionType`. */
+  private signatureOf(node: FunctionDeclaration): FunctionType {
+    return functionType(
+      node.params.map((p) => primitiveType(p.type)),
+      primitiveType(node.returnType),
+    );
   }
 
   /** Dispatch to the visitor method for this node, returning its type. */
@@ -223,12 +267,13 @@ class Checker implements NodeVisitor<Type> {
   }
 
   fnDecl(node: FunctionDeclaration): Type {
-    const signature = functionType(
-      node.params.map((p) => primitiveType(p.type)),
-      primitiveType(node.returnType),
-    );
-    // Install the signature before checking the body so the function can recurse.
-    this.declare(node.name, signature, "function", node.nameLocation);
+    const signature = this.signatureOf(node);
+    // Hoisting already installed this signature; declaring it again would report a
+    // duplicate. Anything not hoisted is installed here, which is what lets a
+    // function still recurse.
+    if (!this.hoisted.has(node.location.offset)) {
+      this.declare(node.name, signature, "function", node.nameLocation);
+    }
 
     const outer = this.scope;
     this.scope = new Scope(this.scope);
@@ -283,6 +328,10 @@ class Checker implements NodeVisitor<Type> {
   block(node: Block): Type {
     const outer = this.scope;
     this.scope = new Scope(outer);
+    // A block is a scope, so it hoists its own functions the same way the program
+    // does. This is what lets a pair of mutually recursive helpers be written as
+    // sibling declarations inside a function body.
+    this.hoistFunctions(node.declarations);
     for (const declaration of node.declarations) this.visitDeclaration(declaration);
     this.scope = outer;
     return errorType;
@@ -545,10 +594,44 @@ class Checker implements NodeVisitor<Type> {
     return symbol.type;
   }
 
+  index(node: IndexExpression): Type {
+    const targetType = this.visit(node.target);
+    const indexType = this.visit(node.index);
+    if (isError(targetType) || isError(indexType)) return errorType;
+
+    // Only a string can be indexed. Vela has no collections, so this is the whole
+    // of what indexing means; `number[0]` and `bool[0]` are type errors, not
+    // coercions to a string.
+    if (targetType.kind !== "string") {
+      this.bag.add(
+        `this has type '${typeToString(targetType)}' and cannot be indexed; only a 'string' can`,
+        node.target.location,
+        ["Vela has no arrays, so a string is the only thing that can be indexed"],
+      );
+      return errorType;
+    }
+    if (indexType.kind !== "number") {
+      this.bag.add(
+        `a string index has type '${typeToString(indexType)}' but 'number' was expected`,
+        node.index.location,
+        ["indexes count code units, so 0 is the first character"],
+      );
+      return errorType;
+    }
+    // The result is a one-code-unit string, so `+` and `len` still apply to it.
+    return stringType;
+  }
+
   call(node: CallExpression): Type {
     const calleeType = this.visit(node.callee);
     const argTypes = node.args.map((arg) => this.visit(arg));
     if (calleeType.kind === "error") return errorType;
+    // A variable declared as `function` holds a function whose signature was not
+    // recorded, so the arity and the return type cannot be checked here. The call
+    // is allowed and the result is `any`, which absorbs any use of it. This is the
+    // documented cost of the bare type, and the alternative — a full signature
+    // type — would only let a function be stored under one exact signature.
+    if (calleeType.kind === "anyFunction") return anyType;
     if (calleeType.kind !== "function") {
       this.bag.add(
         `this is not a function (it has type '${typeToString(calleeType)}')`,

@@ -19,25 +19,9 @@ fn celsiusToKelvin(c: number): number {
     return c + 273.15;
 }
 
-// Vela has no `floor`, so build one from `%`. `x % 1` is the fractional part of
-// x with the sign of x, so subtracting it truncates towards zero for positives
-// and adding it does the same for negatives.
-fn trunc(x: number): number {
-    if (x >= 0) { return x - (x % 1); }
-    return x + ((0 - x) % 1);
-}
-
-// Round half away from zero.
-fn round(x: number): number {
-    if (x >= 0) { return trunc(x + 0.5); }
-    return trunc(x - 0.5);
-}
-
-// Integer division, which Vela does not have. `/` always produces a fraction, so
-// trunc is what turns a quotient back into a whole number.
-fn idiv(a: number, b: number): number {
-    return trunc(a / b);
-}
+// `trunc`, `round`, and `idiv` are built-ins now, so they are not defined here.
+// This file used to carry hand-written copies of all three as a recipe for
+// working without them.
 
 // One decimal place. Multiply by ten to move the digit we want, round to an
 // integer, then split the whole part from the tenths digit.

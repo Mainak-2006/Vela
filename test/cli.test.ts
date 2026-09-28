@@ -132,7 +132,10 @@ test("vela tokens prints one token per line as position, kind, lexeme", () => {
     '1:7  string   "x"',
     "1:10  )        )",
     "1:11  ;        ;",
-    "2:-1  eof",
+    // The eof token sits at the real end of input. This used to read 2:-1,
+    // because the location was derived from the last real token rather than the
+    // current position, which corrupted every "unexpected end of input" caret.
+    "2:1  eof",
   ]);
 });
 
@@ -163,6 +166,43 @@ test("vela ast reports a syntax error and still shows the partial tree", () => {
 test("an unknown flag is not silently treated as a file", () => {
   const { status } = vela("run", "--nonsense");
   assert.equal(status, 1);
+});
+
+test("read() takes a line from a real pipe, one byte at a time", async () => {
+  // This is the only test that exercises the actual stdin reader rather than an
+  // injected source, and it is the only place a byte-at-a-time reader shows up:
+  // `café` and `→` are more than one byte each, so decoding per byte would
+  // replace every one of them with U+FFFD.
+  const path = source(
+    "read-stdin.vela",
+    [
+      'let a: string = read();',
+      'let b: string = read();',
+      'print(len(a));',
+      'print(a);',
+      'print(b);',
+      "",
+    ].join("\n"),
+  );
+
+  const child = spawn("npx", ["tsx", cli, "run", path], {
+    cwd: root,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdout += String(chunk);
+  });
+  child.stdin.write("café\n→\n");
+  child.stdin.end();
+
+  const status = await new Promise<number | null>((resolve) => {
+    child.on("close", resolve);
+  });
+
+  assert.equal(status, 0);
+  assert.equal(stdout, "4\ncafé\n→\n");
 });
 
 test("a reader that hangs up ends the run quietly", async () => {

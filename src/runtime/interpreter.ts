@@ -26,6 +26,7 @@ import type {
   BooleanLiteral,
   BreakStatement,
   CallExpression,
+  IndexExpression,
   ContinueStatement,
   Declaration,
   Expression,
@@ -87,12 +88,25 @@ class ContinueSignal {
 export function createGlobalEnvironment(): Environment {
   const globals = new Environment(null);
   for (const builtin of createBuiltins()) {
-    if (builtin.kind === "native") globals.define(builtin.name, builtin);
+    if (builtin.kind === "native") globals.definePermanent(builtin.name, builtin);
   }
   return globals;
 }
 
 export type DeclarationObserver = (declaration: Declaration) => void;
+
+/**
+ * How many nested Vela calls are allowed before the run is abandoned.
+ *
+ * Chosen against the host's own limit, measured rather than guessed: a Vela
+ * frame costs several host frames, and on this runtime V8's stack runs out
+ * somewhere between 800 and 900 nested Vela calls. 750 leaves headroom above the
+ * deepest recursion a correct program here needs — a 500-frame recursion is a
+ * large one for a language with no tail calls — while still failing before the
+ * host limit does. The point is a diagnostic that names the Vela program, not
+ * the V8 stack overflow it happened to hit first.
+ */
+const MAX_CALL_DEPTH = 750;
 
 export class Interpreter implements NodeVisitor<Value> {
   /**
@@ -102,6 +116,8 @@ export class Interpreter implements NodeVisitor<Value> {
    * environment parameter through every method.
    */
   private scope: Environment;
+  /** How many Vela calls are currently on the stack, for the depth guard. */
+  private depth = 0;
 
   constructor(globals: Environment) {
     this.scope = globals;
@@ -373,6 +389,34 @@ export class Interpreter implements NodeVisitor<Value> {
     return value;
   }
 
+  index(node: IndexExpression): Value {
+    const target = this.evaluate(node.target);
+    if (target.kind !== "string") {
+      throw new RuntimeError(
+        `this is not a string (it has type '${target.kind}'), so it cannot be indexed`,
+        node.target.location,
+      );
+    }
+    const index = this.evaluate(node.index);
+    if (index.kind !== "number") {
+      throw new RuntimeError(
+        `a string index has type '${index.kind}' but 'number' was expected`,
+        node.index.location,
+      );
+    }
+    // `len` counts UTF-16 code units, so indexing does the same. A position past
+    // the end is a runtime error rather than a zero-length answer, because an
+    // empty string is a real value that a program can build and compare.
+    const i = index.value;
+    if (i < 0 || i >= target.value.length) {
+      throw new RuntimeError(
+        `index ${i} is out of range for a string of length ${target.value.length}`,
+        node.index.location,
+      );
+    }
+    return { kind: "string", value: target.value[i]! };
+  }
+
   call(node: CallExpression): Value {
     const callee = this.evaluate(node.callee);
     if (!isCallable(callee)) {
@@ -408,12 +452,24 @@ export class Interpreter implements NodeVisitor<Value> {
     closureScope: Environment,
     args: readonly Value[],
   ): Value {
+    // Guard the call depth rather than letting a runaway recursion run the host
+    // stack out. An uncatchable `RangeError` from V8 would bypass every
+    // `RuntimeError` handler in the program, the REPL, and the CLI alike, and
+    // report a host implementation detail instead of anything about the Vela
+    // program that caused it.
+    if (this.depth >= MAX_CALL_DEPTH) {
+      throw new RuntimeError(
+        `maximum call depth exceeded (${MAX_CALL_DEPTH} nested calls): the program is probably recursing without a base case`,
+        declaration.location,
+      );
+    }
     const outer = this.scope;
     const scope = closureScope.child();
     declaration.params.forEach((param, i) => {
       scope.define(param.name, args[i] ?? VOID);
     });
     this.scope = scope;
+    this.depth++;
     try {
       for (const inner of declaration.body.declarations) this.executeLocal(inner);
       return VOID;
@@ -421,6 +477,9 @@ export class Interpreter implements NodeVisitor<Value> {
       if (signal instanceof ReturnSignal) return signal.value;
       throw signal;
     } finally {
+      // Decremented here rather than on the success path alone, so a throw from
+      // a nested call does not leave the count permanently raised.
+      this.depth--;
       this.scope = outer;
     }
   }

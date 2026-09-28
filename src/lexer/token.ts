@@ -34,6 +34,8 @@ export const TOKEN = {
   TYPE_STRING: "string",
   TYPE_BOOL: "bool",
   TYPE_VOID: "void",
+  /** The bare function type, usable where a signature would be too much. */
+  TYPE_FUNCTION: "function",
 
   // Boolean literals
   TRUE: "true",
@@ -56,6 +58,20 @@ export const TOKEN = {
   AND_AND: "&&",
   OR_OR: "||",
 
+  // Compound assignment. These are sugar: each one means `x = x <op> y`, and
+  // the parser desugars them rather than the checker or interpreter knowing
+  // anything about them.
+  PLUS_EQUAL: "+=",
+  MINUS_EQUAL: "-=",
+  STAR_EQUAL: "*=",
+  SLASH_EQUAL: "/=",
+  PERCENT_EQUAL: "%=",
+
+  // Standalone increment and decrement. These are statements, not expressions:
+  // there is no post-increment value, so `let y: number = i++;` is a parse error.
+  PLUS_PLUS: "++",
+  MINUS_MINUS: "--",
+
   // Punctuation
   LEFT_PAREN: "(",
   RIGHT_PAREN: ")",
@@ -64,6 +80,8 @@ export const TOKEN = {
   COMMA: ",",
   SEMICOLON: ";",
   COLON: ":",
+  LEFT_BRACKET: "[",
+  RIGHT_BRACKET: "]",
 
   // Sentinel
   EOF: "eof",
@@ -86,6 +104,7 @@ const KEYWORDS: ReadonlyMap<string, TokenKind> = new Map([
   ["string", TOKEN.TYPE_STRING],
   ["bool", TOKEN.TYPE_BOOL],
   ["void", TOKEN.TYPE_VOID],
+  ["function", TOKEN.TYPE_FUNCTION],
   ["true", TOKEN.TRUE],
   ["false", TOKEN.FALSE],
 ]);
@@ -133,12 +152,30 @@ export function describeKind(kind: TokenKind): string {
       return "'{'";
     case TOKEN.RIGHT_BRACE:
       return "'}'";
+    case TOKEN.LEFT_BRACKET:
+      return "'['";
+    case TOKEN.RIGHT_BRACKET:
+      return "']'";
     case TOKEN.COMMA:
       return "','";
     case TOKEN.COLON:
       return "':'";
     case TOKEN.EQUAL:
       return "'='";
+    case TOKEN.PLUS_EQUAL:
+      return "'+='";
+    case TOKEN.MINUS_EQUAL:
+      return "'-='";
+    case TOKEN.STAR_EQUAL:
+      return "'*='";
+    case TOKEN.SLASH_EQUAL:
+      return "'/='";
+    case TOKEN.PERCENT_EQUAL:
+      return "'%='";
+    case TOKEN.PLUS_PLUS:
+      return "'++'";
+    case TOKEN.MINUS_MINUS:
+      return "'--'";
     default:
       return `'${kind}'`;
   }

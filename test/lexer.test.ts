@@ -54,6 +54,28 @@ describe("lexer: literals", () => {
     assert.match(errors("1e")[0] ?? "", /expected a digit in the exponent/);
   });
 
+  it("keeps the token for a malformed number instead of dropping it", () => {
+    // These used to return without emitting a number, so `1e+` scanned to
+    // nothing at all and `1.foo` lost its `1.`, leaving the parser to blame
+    // whatever came next.
+    assert.deepEqual(kinds("1e+"), [TOKEN.NUMBER]);
+    assert.deepEqual(kinds("1."), [TOKEN.NUMBER]);
+    assert.deepEqual(kinds("1.foo"), [TOKEN.NUMBER, TOKEN.IDENT]);
+  });
+
+  it("diagnoses a radix prefix rather than splitting the token", () => {
+    // `0x10` used to lex as the number 0 followed by the identifier x10, which
+    // compiled into the wrong program with no complaint anywhere.
+    assert.match(errors("0x10")[0] ?? "", /hexadecimal literals are not supported/);
+    assert.match(errors("0b101")[0] ?? "", /binary literals are not supported/);
+    assert.deepEqual(kinds("0x10"), [TOKEN.NUMBER]);
+  });
+
+  it("still lexes plain decimal numbers after the radix check", () => {
+    assert.deepEqual(kinds("0 42 0.5 007"), [TOKEN.NUMBER, TOKEN.NUMBER, TOKEN.NUMBER, TOKEN.NUMBER]);
+    assert.deepEqual(errors("0 42 0.5 007"), []);
+  });
+
   it("lexes booleans as keywords", () => {
     assert.deepEqual(kinds("true false"), [TOKEN.TRUE, TOKEN.FALSE]);
   });
@@ -210,6 +232,23 @@ describe("lexer: positions", () => {
     const diag = bag.errors()[0];
     assert.equal(diag?.location.line, 2);
     assert.equal(diag?.location.column, 17);
+  });
+
+  it("places the EOF token at the real end of input", () => {
+    // This used to be derived from the last real token, so trailing trivia left
+    // it at a negative column, which is what every "unexpected end of input"
+    // caret was drawn from.
+    const eof = lex('print("x");\n').tokens.at(-1);
+    assert.deepEqual(
+      [eof?.location.line, eof?.location.column, eof?.location.length],
+      [2, 1, 0],
+    );
+  });
+
+  it("places EOF after trailing whitespace on the final line", () => {
+    const eof = lex("let x: number = 1;   ").tokens.at(-1);
+    // The source is twenty-one characters, so EOF sits at column 22.
+    assert.deepEqual([eof?.location.line, eof?.location.column], [1, 22]);
   });
 });
 

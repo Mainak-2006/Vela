@@ -43,7 +43,21 @@ class Lexer {
       this.start = this.current;
       this.scanToken();
     }
-    this.tokens.push(this.token(TOKEN.EOF, ""));
+    // The EOF token sits at the true end of input. Deriving it from `here` would
+    // use `start`, which still points at the last real token once trailing
+    // trivia has been skipped, yielding a column that is negative or otherwise
+    // meaningless. Every "unexpected end of input" diagnostic points here, so it
+    // has to be the position the reader is actually at.
+    this.tokens.push({
+      kind: TOKEN.EOF,
+      lexeme: "",
+      location: {
+        offset: this.current,
+        length: 0,
+        line: this.line,
+        column: this.column,
+      },
+    });
     return this.tokens;
   }
 
@@ -158,6 +172,10 @@ class Lexer {
         return this.emit(TOKEN.LEFT_BRACE);
       case "}":
         return this.emit(TOKEN.RIGHT_BRACE);
+      case "[":
+        return this.emit(TOKEN.LEFT_BRACKET);
+      case "]":
+        return this.emit(TOKEN.RIGHT_BRACKET);
       case ",":
         return this.emit(TOKEN.COMMA);
       case ";":
@@ -165,14 +183,23 @@ class Lexer {
       case ":":
         return this.emit(TOKEN.COLON);
       case "+":
+        // Order matters: the two-character forms are tried first, so `+=` and
+        // `++` are never scanned as a `+` followed by something else.
+        if (this.match("=")) return this.emit(TOKEN.PLUS_EQUAL);
+        if (this.match("+")) return this.emit(TOKEN.PLUS_PLUS);
         return this.emit(TOKEN.PLUS);
       case "-":
+        if (this.match("=")) return this.emit(TOKEN.MINUS_EQUAL);
+        if (this.match("-")) return this.emit(TOKEN.MINUS_MINUS);
         return this.emit(TOKEN.MINUS);
       case "*":
+        if (this.match("=")) return this.emit(TOKEN.STAR_EQUAL);
         return this.emit(TOKEN.STAR);
       case "/":
+        if (this.match("=")) return this.emit(TOKEN.SLASH_EQUAL);
         return this.emit(TOKEN.SLASH);
       case "%":
+        if (this.match("=")) return this.emit(TOKEN.PERCENT_EQUAL);
         return this.emit(TOKEN.PERCENT);
 
       // Peek for the second character before falling back to a one-character operator.
@@ -211,13 +238,36 @@ class Lexer {
   /**
    * Numbers: `123`, `1_000_000`, `3.14`, `1.5e-3`. Underscores are permitted only
    * between digits, so a trailing `1_` is a diagnostic rather than a silent 1.
+   *
+   * A malformed literal is still emitted as a token. Dropping it would silently
+   * shorten the stream, so `1e+` would look like empty input and `1.foo` would
+   * lose its `1.`, leaving the parser to complain about whatever came next
+   * instead of about the number the author actually wrote.
    */
   private scanNumber(): void {
+    // A radix prefix is the one case where a number silently means something
+    // else: `0x10` would otherwise scan as the number 0 followed by the
+    // identifier x10, and the program would compile into the wrong thing with no
+    // complaint at all. Diagnose it instead.
+    //
+    // `scanToken` has already consumed the leading character, so the `0` sits at
+    // `start` and the prefix letter is the character after the current position.
+    const prefix = this.peek();
+    if (prefix === "x" || prefix === "X") {
+      this.advance();
+      this.fail("hexadecimal literals are not supported (write the number in decimal)");
+      return;
+    }
+    if (prefix === "b" || prefix === "B") {
+      this.advance();
+      this.fail("binary literals are not supported (write the number in decimal)");
+      return;
+    }
     this.scanDigits();
     if (this.peek() === ".") {
       if (!isDigit(this.peek(1))) {
         this.advance();
-        this.fail("expected a digit after the decimal point");
+        this.emitMalformedNumber("expected a digit after the decimal point");
         return;
       }
       this.advance();
@@ -234,7 +284,7 @@ class Lexer {
           line: this.line,
           column: this.column - (this.current - exponentStart),
         });
-        this.scanDigits();
+        this.emitMalformedNumber();
         return;
       }
       this.scanDigits();
@@ -254,6 +304,22 @@ class Lexer {
       lexeme,
       location: this.here(lexeme.length),
       numericValue: value,
+    });
+  }
+
+  /**
+   * Emit a number token for text that could not be scanned into a value, pairing
+   * it with `message` when one is given. The value is whatever the digits scanned
+   * so far are worth, so the token carries a number rather than nothing.
+   */
+  private emitMalformedNumber(message?: string): void {
+    if (message) this.fail(message);
+    const lexeme = this.text.slice(this.start, this.current);
+    this.tokens.push({
+      kind: TOKEN.NUMBER,
+      lexeme,
+      location: this.here(lexeme.length),
+      numericValue: 0,
     });
   }
 

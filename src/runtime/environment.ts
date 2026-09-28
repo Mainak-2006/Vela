@@ -20,6 +20,12 @@ export class Environment {
   private readonly values = new Map<string, Value>();
   /** Names already bound here, kept in insertion order for stable listings. */
   readonly names: string[] = [];
+  /**
+   * Bindings that `clear` must not remove. The built-ins are permanent: they are
+   * part of the language rather than part of a program's state, so a REPL `.reset`
+   * that dropped them would leave the session permanently broken.
+   */
+  private readonly permanent = new Set<string>();
 
   constructor(readonly parent: Environment | null) {}
 
@@ -63,12 +69,24 @@ export class Environment {
   }
 
   /**
-   * Remove every binding in this scope. Used by the REPL's `.reset`. Child scopes
-   * are unaffected, so this is only meaningful on a global scope.
+   * Bind `name` permanently: it survives `clear`. Reserved for the built-ins.
+   */
+  definePermanent(name: string, value: Value): void {
+    this.define(name, value);
+    this.permanent.add(name);
+  }
+
+  /**
+   * Remove every non-permanent binding in this scope, so the REPL's `.reset` can
+   * start over without discarding the built-ins. Child scopes are unaffected, so
+   * this is only meaningful on a global scope.
    */
   clear(): void {
-    this.values.clear();
+    for (const name of this.names) {
+      if (!this.permanent.has(name)) this.values.delete(name);
+    }
     this.names.length = 0;
+    for (const name of this.permanent) this.names.push(name);
   }
 
   /** The scope that binds `name`, or null. Useful for tracing. */

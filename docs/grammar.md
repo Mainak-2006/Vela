@@ -48,15 +48,16 @@ rather than a malformed number.
 
 ### Keywords
 
-These twelve words are reserved and cannot be used as identifiers:
+These seventeen words are reserved and cannot be used as identifiers:
 
 ```
 fn   let   return   if   else   while   for   break   continue   print
-true   false
+true   false   number   string   bool   void   function
 ```
 
 `true` and `false` are literals of type `bool`, listed here because they are
-also reserved.
+also reserved. The last five are type names, so `let number: number = 1;` is a
+parse error rather than a variable named `number`.
 
 ### Numbers
 
@@ -134,12 +135,14 @@ letStmt      ::= "let" identifier ":" T "=" expression ";"
 returnStmt   ::= "return" [ expression ] ";"
 ifStmt       ::= "if" "(" expression ")" statement [ "else" statement ]
 whileStmt    ::= "while" "(" expression ")" statement
-forStmt      ::= "for" "(" forInit ";" expression ";" expression ")" statement
+forStmt      ::= "for" "(" forInit ";" expression ";" forUpdate ")" statement
+forUpdate    ::= increment | expression
 forInit      ::= "let" identifier ":" T "=" expression
 block        ::= "{" statement * "}"
 breakStmt    ::= "break" ";"
 continueStmt ::= "continue" ";"
 exprStmt     ::= expression ";"
+increment    ::= identifier ( "++" | "--" ) ";"
 ```
 
 Braces are not required around a single statement, so `if (n > 0) print("hi");`
@@ -155,7 +158,18 @@ for (let i: number = 0; i < 10; i = i + 1) {
 }
 ```
 
-There is no `++`, `--`, `+=`, or `-=`. Every operator is spelled out.
+The update is an expression slot, so `i++` is accepted there — it is the one
+place a statement form appears without its semicolon.
+
+`++` and `--` are **statements**, not expressions, so they have no value:
+`let y: number = i++;` and `i + j++;` are both errors. Outside the `for` update
+they require a trailing semicolon. A leading `--` is *not* a decrement: `--1` is
+a doubled negation and equals `1`, which is why `i--` needs a name in front of it
+to be one.
+
+Compound assignment `+=`, `-=`, `*=`, `/=`, and `%=` exist, and are sugar for
+`x = x <op> value`. They desugar in the parser, so the AST, checker, and
+interpreter are unchanged and every type rule applies unchanged.
 
 `break` exits the innermost `while` or `for`. `continue` jumps to the update
 expression of a `for`, or to the condition of a `while`.
@@ -176,7 +190,8 @@ Precedence, loosest to tightest. Each level is left-associative.
 
 ```
 expression   ::= assignment
-assignment   ::= identifier "=" assignment | or
+assignment   ::= identifier assignOp assignment | or
+assignOp     ::= "=" | "+=" | "-=" | "*=" | "/=" | "%=" 
 or           ::= and { "||" and }
 and          ::= equality { "&&" equality }
 equality     ::= comparison { ( "==" | "!=" ) comparison }
@@ -184,7 +199,9 @@ comparison   ::= term { ( "<" | "<=" | ">" | ">=" ) term }
 term         ::= factor { ( "+" | "-" ) factor }
 factor       ::= unary { ( "*" | "/" | "%" ) unary }
 unary        ::= ( "-" | "!" ) unary | call
-call         ::= primary { "(" [ expression { "," expression } ] ")" }
+call         ::= primary { suffix }
+suffix       ::= "(" [ expression { "," expression } ] ")"
+               | "[" expression "]"
 primary      ::= number | string | "true" | "false"
                | identifier | "(" expression ")"
 ```
@@ -196,23 +213,42 @@ rejecting it afterwards, which is what lets `a + 1 = 2` report one clear error �
 "the left-hand side of '=' must be a variable" — instead of a cascade about a
 missing semicolon.
 
-**There is no indexing.** `a[i]` is not in the grammar, and `[` is not even a
-token, so it is a lex error. This was a deliberate cut: nothing in the type
-system has an element type, so supporting the syntax would mean accepting a
-construct that could never type-check.
+**Indexing is `s[i]`, and a `string` is the only thing it accepts.** The result is
+a one-code-unit `string`. `len` counts code units, so valid indices are `0`
+through `len(s) - 1`; anything else is a runtime error, not an empty string. A
+`number`, `bool`, or `void` is a compile error — there is no collection in the
+language to subscript, so the diagnostic says so.
+
+Suffixes share one loop, so calls and indexes chain freely: `f()[0]` and `s[0][1]`
+parse the way `f()(1)` does.
 
 **Calls take no trailing comma.** `f(1,)` is an error.
 
 ## Types
 
 ```
-T ::= "number" | "string" | "bool" | "void"
+T ::= "number" | "string" | "bool" | "void" | "function"
 ```
 
-Function types are constructed by declarations but never written by hand. There
-is no syntax for a function-typed variable, so a function can be called by name
-but not stored, passed, or returned as a value. A `fnDecl` may be nested, and
-its body sees its own name, so recursion works.
+The first four are primitives. `function` is a bare function type: it lets a
+function be stored, passed, and returned, without naming a signature.
+
+```vela
+fn double(x: number): number { return x * 2; }
+
+let f: function = double;   // correct
+let n: number = 5;
+let g: function = n;        // error: a number is not a function
+```
+
+The signature is not recorded, so a call through one is unchecked: `f(1, 2, 3)`
+compiles and then fails at runtime, and the result has no known type, which is why
+`tostring` is often needed around one.
+
+A `fnDecl` may be nested, and its body sees its own name, so recursion works. More
+than that, every signature in a declaration list is hoisted before any body in it
+is checked, so a forward call and a mutually recursive pair both resolve. A `let`
+is *not* hoisted and must be declared before use.
 
 ## Static rules
 
@@ -257,15 +293,27 @@ treats a loop as not returning, so a function whose only `return` is inside a
 return statement". Being wrong in the safe direction is the right trade for a
 first version, and it is the most significant known limitation in the checker.
 
-**Names are file-scoped and declared before use.** A block may shadow an outer
-name (`{ let s: string = "i"; print(s); }` is fine), but redeclaring a name in
-the same scope is an error, and so is calling a function before its declaration.
-Mutual recursion is therefore rejected — the second function is not in scope
-inside the first.
+**Functions may be used before they are written; variables may not.** A block may
+shadow an outer name (`{ let s: string = "i"; print(s); }` is fine), but
+redeclaring a name in the same scope is an error. Every `fn` signature in a
+declaration list is installed before any body in that list is checked, so a
+forward call and a mutually recursive pair both resolve. A `let` must be declared
+before use, because its type comes from a value that has to be computed first.
+
+**A string index out of range is a runtime error,** not an empty string:
+`s[5]` on `"ab"` reports `index 5 is out of range for a string of length 2`.
+Negative indices are included in this. The checker cannot know the length, so
+this is one of the errors that survives type checking.
 
 **`print` is a statement, not a function.** `print` cannot appear in an
-expression, so `let a: number = print(1);` is a parse error. The four callable
-built-ins are `tostring`, `tonumber`, `typeOf`, and `len`.
+expression, so `let a: number = print(1);` is a parse error. The thirteen callable
+built-ins are `tostring`, `tonumber`, `typeOf`, `len`, `trunc`, `floor`, `ceil`,
+`round`, `abs`, `min`, `max`, `idiv`, and `read`.
+
+**`read()` takes no arguments and prints no prompt,** returning one line of stdin
+with the newline stripped, and `""` at end of input. There is no `null` to signal
+end-of-input with, so an empty string is the answer — and a loop condition on
+`line != ""` is how "until the user is done" is written.
 
 **Errors stop the pipeline.** A program with a type error does not run, so
 statements before the error never execute.
@@ -273,8 +321,15 @@ statements before the error never execute.
 ## Known gaps
 
 - The `while`-only-return limitation described above, in the return analysis.
-- No string indexing and no `floor`, `round`, or integer division, so
-  `examples/temperature.vela` builds all three out of `%` instead.
+- No `sqrt` or `pow`, so `docs/SKILLS.md` section 11 writes both out of `trunc`.
+  The eight numeric built-ins cover rounding and integer division, which is the
+  part worth promising exactly.
+- `s[i]` counts UTF-16 code units, so a surrogate pair occupies two indices and
+  reading one half of an emoji gives a broken character. There is no code-point
+  iteration to offer instead.
+- The bare `function` type records no signature, so a call through one is not
+  checked. This is the one known hole in the type system, and it is deliberate:
+  see `docs/SKILLS.md` section 18.
 - No ordering on `string` or `bool`, as described under static rules. `==` and
   `!=` are the whole of the comparison vocabulary for those two types.
 - The REPL's multi-line heuristic is not part of this grammar. It reads balanced

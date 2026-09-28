@@ -178,6 +178,52 @@ describe("parser: assignment", () => {
   });
 });
 
+describe("parser: compound assignment", () => {
+  it("desugars each operator into a plain assignment", () => {
+    // Nothing downstream knows these exist, which is why they are cheap: the
+    // AST for `x += 1` is exactly the AST for `x = x + 1`.
+    for (const [source, op] of [["x += 1;", "+"], ["x -= 1;", "-"], ["x *= 1;", "*"], ["x /= 1;", "/"], ["x %= 1;", "%"]] as const) {
+      assert.equal(
+        sexp(source),
+        `(program (expressionStmt (assign x (binary ${op} (variable x) (numberLiteral 1)))))`,
+        source,
+      );
+    }
+  });
+
+  it("parses ++ and -- as statements", () => {
+    const expected = "(program (expressionStmt (assign i (binary + (variable i) (numberLiteral 1)))))";
+    assert.equal(sexp("i++;"), expected);
+    assert.equal(sexp("i--;"), "(program (expressionStmt (assign i (binary - (variable i) (numberLiteral 1)))))");
+  });
+
+  it("parses ++ in a for update", () => {
+    assert.equal(
+      sexp("for (let i: number = 0; i < 3; i++) { }"),
+      "(program (for (letDecl i: number (numberLiteral 0)) (binary < (variable i) (numberLiteral 3)) (assign i (binary + (variable i) (numberLiteral 1))) (block)))",
+    );
+  });
+
+  it("rejects ++ where a value is expected", () => {
+    // In a declaration the value slot makes the intent clear: there is no value.
+    assert.match(errors("let y: number = i++;")[0] ?? "", /is a statement and has no value/);
+    // As a statement of its own, `i++` is complete, so the complaint is that the
+    // expression keeps going and the semicolon never arrives.
+    assert.match(errors("i++ + 1;")[0] ?? "", /expected ';' at the end of the statement/);
+  });
+
+  it("rejects a leading ++ with no variable", () => {
+    assert.match(errors("++i;")[0] ?? "", /expected a variable name before the increment/);
+  });
+
+  it("keeps a leading -- as a doubled negation", () => {
+    // `--1` is 1, not a decrement of something. Only a name in front makes `--`
+    // a decrement, which is what keeps both readings available.
+    assert.equal(sexp("--1;"), "(program (expressionStmt (unary - (unary - (numberLiteral 1)))))");
+    assert.equal(sexp("i--;"), "(program (expressionStmt (assign i (binary - (variable i) (numberLiteral 1)))))");
+  });
+});
+
 describe("parser: calls", () => {
   it("parses a call with no arguments", () => {
     assert.equal(sexp("f();"), "(program (expressionStmt (call (variable f))))");

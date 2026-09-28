@@ -1,7 +1,8 @@
-// strings.vela — concatenation, comparison, escapes, and the string built-ins.
+// strings.vela — concatenation, comparison, indexing, escapes, and the built-ins.
 //
-// Vela has no string indexing, so a string can only be built up, not taken
-// apart. Accumulating in a loop is therefore the idiomatic way to build one.
+// Indexing is the main thing to look at here. `s[i]` returns one UTF-16 code unit
+// as a string, and `len` counts code units, so the two agree: index 0 through
+// len(s) - 1 is the whole string. That is what makes a loop over a string work.
 
 fn repeat(s: string, times: number): string {
     let out: string = "";
@@ -19,10 +20,56 @@ fn pad(s: string, width: number): string {
     return out;
 }
 
+// A positional comparison: equal length, then the same character at every index.
+// This is `==` for the common case, written out so the indexing is visible.
+fn sameCharacters(a: string, b: string): bool {
+    if (len(a) != len(b)) { return false; }
+    for (let i: number = 0; i < len(a); i = i + 1) {
+        if (a[i] != b[i]) { return false; }
+    }
+    return true;
+}
+
+// A real anagram test needs order-independence, which means counting: for each
+// character of `a`, confirm `b` contains exactly as many. The inner loop skips
+// the character it is counting, so "ab" is not counted as two of "a".
+fn countIn(s: string, c: string): number {
+    let n: number = 0;
+    for (let i: number = 0; i < len(s); i = i + 1) {
+        if (s[i] == c) { n = n + 1; }
+    }
+    return n;
+}
+
 fn areAnagrams(a: string, b: string): bool {
-    // Without indexing this can only compare the whole string, but it shows
-    // that `==` on strings is a value comparison, not an identity check.
-    return a == b;
+    if (len(a) != len(b)) { return false; }
+    for (let i: number = 0; i < len(a); i = i + 1) {
+        if (countIn(b, a[i]) != countIn(a, a[i])) { return false; }
+    }
+    return true;
+}
+
+fn startsWith(pre: string, s: string): bool {
+    if (len(pre) > len(s)) { return false; }
+    for (let i: number = 0; i < len(pre); i = i + 1) {
+        if (pre[i] != s[i]) { return false; }
+    }
+    return true;
+}
+
+fn countOf(needle: string, hay: string): number {
+    let n: number = len(needle);
+    if (n == 0) { return 0; }
+    let found: number = 0;
+    // i + n <= len(hay) rather than i < len(hay), so a match cannot run off the end.
+    for (let i: number = 0; i + n <= len(hay); i = i + 1) {
+        let hit: bool = true;
+        for (let j: number = 0; j < n; j = j + 1) {
+            if (hay[i + j] != needle[j]) { hit = false; }
+        }
+        if (hit) { found = found + 1; }
+    }
+    return found;
 }
 
 let greeting: string = "hello";
@@ -34,7 +81,12 @@ print("padded:   " + pad("7", 5) + "|");
 print("length:   " + tostring(len(greeting)));
 print("empty:    " + tostring(len("")));
 print("compare:  " + tostring(greeting == "hello") + " " + tostring(greeting == "goodbye"));
-print("anagrams: " + tostring(areAnagrams("abc", "abc")) + " " + tostring(areAnagrams("abc", "abd")));
+print("same:     " + tostring(sameCharacters("abc", "abc")) + " " + tostring(sameCharacters("abc", "cba")));
+print("anagram:  " + tostring(areAnagrams("abc", "cba")) + " " + tostring(areAnagrams("abc", "abd")));
+print("prefix:   " + tostring(startsWith("hell", greeting)) + " " + tostring(startsWith("ello", greeting)));
+print("count:    " + tostring(countOf("ab", "ababab")) + " " + tostring(countOf("ab", "aaaa")));
+print("index:    " + greeting[0] + greeting[len(greeting) - 1] + " " + greeting[1]);
+print("indexed:  " + tostring(len(greeting[0])));
 print("escapes:  tab[\t] quote[\"] slash[\\]");
-print("types:    " + typeOf(greeting) + " " + typeOf(len(greeting)));
+print("types:    " + typeOf(greeting) + " " + typeOf(len(greeting)) + " " + typeOf(greeting[0]));
 print("convert:  " + tostring(tonumber("17")) + " " + tostring(tonumber("nope")));

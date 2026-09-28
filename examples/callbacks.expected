@@ -1,0 +1,15 @@
+stored and reassigned:
+f(21) = 42
+f(5) = 25
+f(5) = -5
+through a parameter:
+f(10) = 20
+f(4) = 16
+returned as a value:
+f(6) = 36
+f(6) = 12
+chosen by a flag:
+f(4) = 8
+f(4) = 16
+mutual recursion:
+true false false

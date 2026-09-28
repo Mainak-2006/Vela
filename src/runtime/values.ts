@@ -11,12 +11,12 @@
  * `string` always holds a string.
  */
 
+import fs from "node:fs";
 import type { FunctionDeclaration } from "../ast/nodes.js";
 import {
   anyType,
   numberType,
   stringType,
-  voidType,
   type Type,
 } from "../types/types.js";
 import type { Environment } from "./environment.js";
@@ -168,18 +168,15 @@ export interface BuiltinSpec {
   readonly call: (args: readonly Value[]) => Value;
 }
 
+/**
+ * The callables the runtime provides, in one place. The checker seeds its root
+ * scope from this same table, which is what stops the two from drifting apart.
+ *
+ * `print` is deliberately absent. It is a keyword, so it can never appear in an
+ * expression position, and a signature the language cannot express is a lie in
+ * the table that everything else is derived from.
+ */
 export const BUILTIN_SPECS: readonly BuiltinSpec[] = [
-  {
-    name: "print",
-    arity: 1,
-    paramTypes: [anyType],
-    returnType: voidType,
-    call: (args) => {
-      const target = args[0];
-      if (target) write(target);
-      return VOID;
-    },
-  },
   {
     name: "tostring",
     arity: 1,
@@ -222,11 +219,181 @@ export const BUILTIN_SPECS: readonly BuiltinSpec[] = [
       return number(target && target.kind === "string" ? target.value.length : 0);
     },
   },
+
+  // ------------------------------------------------------------- numbers
+  //
+  // These were recipes in the reference documentation until a function per
+  // concept was a line of source rather than a paragraph. The definitions match
+  // the recipes exactly, so a program written against either behaves the same.
+
+  {
+    name: "trunc",
+    arity: 1,
+    paramTypes: [numberType],
+    returnType: numberType,
+    call: (args) => number(trunc(numeric(args[0]))),
+  },
+  {
+    name: "floor",
+    arity: 1,
+    paramTypes: [numberType],
+    returnType: numberType,
+    call: (args) => {
+      const x = numeric(args[0]);
+      const t = trunc(x);
+      // Math.floor already rounds toward negative infinity, so there is no
+      // reason to reimplement it in terms of trunc. The recipe exists only
+      // because Vela has no Math object.
+      return number(t === x ? t : x < 0 ? t - 1 : t);
+    },
+  },
+  {
+    name: "ceil",
+    arity: 1,
+    paramTypes: [numberType],
+    returnType: numberType,
+    call: (args) => {
+      const x = numeric(args[0]);
+      const t = trunc(x);
+      return number(t === x ? t : x > 0 ? t + 1 : t);
+    },
+  },
+  {
+    name: "round",
+    arity: 1,
+    paramTypes: [numberType],
+    returnType: numberType,
+    // Half away from zero, matching the documented recipe rather than the
+    // banker's rounding that Math.round does.
+    call: (args) => {
+      const x = numeric(args[0]);
+      return number(trunc(x >= 0 ? x + 0.5 : x - 0.5));
+    },
+  },
+  {
+    name: "abs",
+    arity: 1,
+    paramTypes: [numberType],
+    returnType: numberType,
+    call: (args) => {
+      const x = numeric(args[0]);
+      return number(x < 0 ? 0 - x : x);
+    },
+  },
+  {
+    name: "min",
+    arity: 2,
+    paramTypes: [numberType, numberType],
+    returnType: numberType,
+    call: (args) => number(Math.min(numeric(args[0]), numeric(args[1]))),
+  },
+  {
+    name: "max",
+    arity: 2,
+    paramTypes: [numberType, numberType],
+    returnType: numberType,
+    call: (args) => number(Math.max(numeric(args[0]), numeric(args[1]))),
+  },
+  {
+    name: "idiv",
+    arity: 2,
+    paramTypes: [numberType, numberType],
+    returnType: numberType,
+    // Truncating rather than flooring, so the result obeys the same
+    // toward-zero rule as `%` does. Dividing by zero yields 0 rather than
+    // raising: a built-in has nowhere to point for a source location, and
+    // Infinity is not a value this language can hold meaningfully.
+    call: (args) => {
+      const b = numeric(args[1]);
+      if (b === 0) return number(0);
+      return number(trunc(numeric(args[0]) / b));
+    },
+  },
+  {
+    name: "read",
+    arity: 0,
+    paramTypes: [],
+    returnType: stringType,
+    // No prompt and no arguments: a prompt would need to know about output, and
+    // arguments would need types to check against. One line in, one line out.
+    //
+    // End of input is the empty string rather than an error. A program reading a
+    // fixed number of lines should stop cleanly, and there is no `null` in Vela
+    // to signal it, so an empty line is the only honest answer available.
+    call: () => {
+      const line = source();
+      return line === null ? string("") : string(stripCarriageReturn(line));
+    },
+  },
 ];
+
+/** Drop a trailing `\r` so a CRLF file does not leave it on every line. */
+function stripCarriageReturn(line: string): string {
+  return line.endsWith("\r") ? line.slice(0, -1) : line;
+}
+
+/** The numeric value of a built-in argument, or 0 if it is not a number. */
+function numeric(value: Value | undefined): number {
+  return value && value.kind === "number" ? value.value : 0;
+}
+
+/** Round toward zero. `x % 1` is the fractional part with the sign of x. */
+function trunc(x: number): number {
+  return x >= 0 ? x - (x % 1) : x + ((0 - x) % 1);
+}
 
 /** The `NativeValue`s installed in a fresh global scope. */
 export function createBuiltins(): readonly Value[] {
   return BUILTIN_SPECS.map((spec) => native(spec.name, spec.arity, spec.call));
+}
+
+/**
+ * Input source for `read()`, indirected for the same reason the output sink is:
+ * swapping this is the only difference between a program that reads stdin and a
+ * test that reads a fixed list of lines.
+ *
+ * The default reads one line at a time from file descriptor 0. It is line-based
+ * rather than character-based because `read()` returns a whole line, and it strips
+ * the trailing newline so a program does not have to. `\r\n` is handled too,
+ * since a file written on Windows should not leave a stray `\r` on every line.
+ */
+let source: () => string | null = readLineFromStdin;
+
+export function setInput(next: () => string | null): () => void {
+  const previous = source;
+  source = next;
+  return () => {
+    source = previous;
+  };
+}
+
+/** Read one line from stdin, or return null at end of input. */
+function readLineFromStdin(): string | null {
+  // Bytes are accumulated and decoded once at the end. Decoding each byte on its own
+  // would replace every character outside ASCII with U+FFFD, since a multi-byte
+  // character is several reads and a lone byte is not a character.
+  const bytes: number[] = [];
+  for (;;) {
+    // One byte at a time is the only way to stop exactly at the newline without
+    // consuming the first byte of the next line, and the line boundary is the
+    // whole contract of `read()`.
+    const buffer = Buffer.alloc(1);
+    let read: number;
+    try {
+      read = fs.readSync(0, buffer, 0, 1, null);
+    } catch (error) {
+      // A non-blocking descriptor, or a closed stream, is end of input as far as a
+      // Vela program is concerned. Rethrowing would surface a host errno in the
+      // middle of an otherwise valid run.
+      if ((error as NodeJS.ErrnoException).code === "EAGAIN") {
+        return bytes.length === 0 ? null : Buffer.from(bytes).toString("utf8");
+      }
+      return null;
+    }
+    if (read === 0) return bytes.length === 0 ? null : Buffer.from(bytes).toString("utf8");
+    if (buffer[0] === 0x0a) return Buffer.from(bytes).toString("utf8");
+    bytes.push(buffer[0]!);
+  }
 }
 
 /**

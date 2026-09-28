@@ -140,6 +140,11 @@ test("isIncomplete asks for more input after an open paren", () => {
   assert.equal(isIncomplete("print(1 +"), true);
 });
 
+test("isIncomplete asks for more input after an open bracket", () => {
+  assert.equal(isIncomplete("print(\"ab\"["), true);
+  assert.equal(isIncomplete("print(\"ab\"[0] +"), true);
+});
+
 test("isIncomplete asks for more input after a trailing operator", () => {
   assert.equal(isIncomplete("1 +"), true);
   assert.equal(isIncomplete("a &&"), true);
@@ -152,6 +157,7 @@ test("isIncomplete is false once the entry is balanced and terminated", () => {
   assert.equal(isIncomplete("let x: number = 1;"), false);
   assert.equal(isIncomplete("fn f(): number { return 1; }"), false);
   assert.equal(isIncomplete("print(\"done\");"), false);
+  assert.equal(isIncomplete("print(\"ab\"[0]);"), false);
 });
 
 test("isIncomplete is false for empty and comment-only input", () => {
@@ -241,6 +247,18 @@ test("Repl.submit resets the environment", () => {
   repl.reset();
   repl.submit("x;");
   assert.match(out.text(), /cannot find 'x'/, "x should no longer resolve after reset");
+});
+
+test("Repl.reset keeps the built-ins bound", () => {
+  // The checker re-seeds its own view of the built-ins on every entry, so a
+  // cleared runtime scope still type-checks and only fails when it runs. That
+  // made the bug invisible to a test that only checked a user binding.
+  const out = captureStream();
+  const repl = new Repl({ output: out.stream });
+  repl.reset();
+  repl.submit('print(tostring(1) + " " + tostring(len("ab")) + " " + typeOf(1) + " " + tostring(tonumber("7")));');
+  assert.doesNotMatch(out.text(), /cannot find/, "built-ins must survive reset");
+  assert.match(out.text(), /1 2 number 7/);
 });
 
 test("Repl.submit reports a type error without running the entry", () => {
@@ -353,4 +371,27 @@ test("Repl.start reports an unknown command without touching state", async () =>
   const text = out.text();
   assert.match(text, /unknown command '\.nope'/);
   assert.match(text, /5\n/, "x survived the bad command");
+});
+
+test("Repl.start serves read() from the lines the embedder supplied", async () => {
+  const out = captureStream();
+  const repl = new Repl({
+    input: inputOf(['print("[" + read() + "]");', 'print("[" + read() + "]");']),
+    output: out.stream,
+    inputLines: ["first", "second"],
+  });
+  await repl.start();
+  const text = out.text();
+  assert.match(text, /\[first\]/);
+  assert.match(text, /\[second\]/);
+});
+
+test("Repl.start reports end of input rather than the line that was just typed", async () => {
+  const out = captureStream();
+  // readline owns the terminal, so descriptor 0 is already drained by the time an
+  // entry runs. Handing `read()` the source line would make Vela code answer a
+  // question about the outside world with its own text.
+  const repl = new Repl({ input: inputOf(['print("[" + read() + "]");']), output: out.stream });
+  await repl.start();
+  assert.match(out.text(), /\[\]/, "an empty line is the end-of-input answer");
 });

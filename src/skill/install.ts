@@ -8,7 +8,7 @@
  * reference can never be the thing that gets loaded — it has to sit behind a
  * lean entry point that an agent opens on demand.
  *
- * `docs/vela.SKILL.md` is that entry point: about 350 lines, and enough of the
+ * `docs/vela.SKILL.md` is that entry point: a few hundred lines, and enough of the
  * language to write most programs without opening anything else. This module
  * copies it into wherever a given tool looks for instructions, rewriting the one
  * placeholder that needs a machine-specific answer — the absolute path of the

@@ -20,6 +20,7 @@
 import { DiagnosticBag, type SourceLocation, span } from "../diagnostics.js";
 import { describeKind, TOKEN, type Token, type TokenKind } from "../lexer/token.js";
 import type {
+  BinaryExpression,
   BinaryOperator,
   Block,
   Declaration,
@@ -32,6 +33,7 @@ import type {
   Program,
   Statement,
   UnaryOperator,
+  Variable,
 } from "../ast/nodes.js";
 
 /** Parse `tokens` into a Program, reporting problems to `bag`. */
@@ -87,6 +89,18 @@ const LOGICAL_PRECEDENCE: ReadonlyMap<TokenKind, { bp: BindingPower; operator: "
     [TOKEN.AND_AND, { bp: BP.and, operator: "and" }],
     [TOKEN.OR_OR, { bp: BP.or, operator: "or" }],
   ]);
+
+/**
+ * Compound assignment operators mapped to the binary operator they stand for.
+ * `x += y` parses as `x = x + y`, so this table only has to name the operator.
+ */
+const COMPOUND_ASSIGNMENT: ReadonlyMap<TokenKind, BinaryOperator> = new Map([
+  [TOKEN.PLUS_EQUAL, "+"],
+  [TOKEN.MINUS_EQUAL, "-"],
+  [TOKEN.STAR_EQUAL, "*"],
+  [TOKEN.SLASH_EQUAL, "/"],
+  [TOKEN.PERCENT_EQUAL, "%"],
+]);
 
 class Parser {
   private current = 0;
@@ -206,6 +220,7 @@ class Parser {
       return null;
     }
     const initializer = this.parseExpression();
+    if (this.reportIncrementInExpression(initializer)) return null;
     const semi = this.expect(TOKEN.SEMICOLON, "';' at the end of the declaration");
     if (!type || !initializer || !semi) {
       this.synchronize();
@@ -280,11 +295,12 @@ class Parser {
       case TOKEN.TYPE_STRING:
       case TOKEN.TYPE_BOOL:
       case TOKEN.TYPE_VOID:
+      case TOKEN.TYPE_FUNCTION:
         this.advance();
         return { name: token.lexeme as PrimitiveTypeName, location: token.location };
       default:
         this.bag.add(
-          `expected a type name (number, string, bool, or void), found ${describeKind(token.kind)}`,
+          `expected a type name (number, string, bool, void, or function), found ${describeKind(token.kind)}`,
           token.location,
           ["every declaration in Vela needs an explicit type"],
         );
@@ -306,10 +322,83 @@ class Parser {
     if (this.check(TOKEN.BREAK)) return this.parseBreak();
     if (this.check(TOKEN.CONTINUE)) return this.parseContinue();
     if (this.check(TOKEN.PRINT)) return this.parsePrint();
+    // `i++;` starts with the name, so it is recognised as `ident` followed by
+    // `++`/`--`. A leading `++` is never a prefix operator, so it can only be a
+    // mistyped increment and is reported as one.
+    if (this.check(TOKEN.IDENT) && (this.peek(1).kind === TOKEN.PLUS_PLUS || this.peek(1).kind === TOKEN.MINUS_MINUS)) {
+      return this.parseIncrement();
+    }
+    if (this.check(TOKEN.PLUS_PLUS)) {
+      return this.parseBareIncrement();
+    }
+    // A leading `--` is left alone. It is two unary minuses here, so `--1;` stays
+    // the documented 1, and parsePrefix handles it.
     if (this.check(TOKEN.LET) || this.check(TOKEN.FN)) {
       return this.parseDeclaration() as Statement | null;
     }
     return this.parseExpressionStatement();
+  }
+
+  /**
+   * The `for` loop update, which is the one place `i++` is written without a
+   * trailing semicolon. It is an expression slot, so the same desugaring applies;
+   * the only difference from a standalone statement is the terminator.
+   */
+  private parseForUpdate(): Expression | null {
+    if (this.check(TOKEN.IDENT) && (this.peek(1).kind === TOKEN.PLUS_PLUS || this.peek(1).kind === TOKEN.MINUS_MINUS)) {
+      const name = this.advance();
+      const op = this.advance();
+      return this.buildCompoundAssignment(name, op.kind === TOKEN.PLUS_PLUS ? "+" : "-", {
+        kind: "numberLiteral",
+        value: 1,
+        location: name.location,
+      });
+    }
+    if (this.check(TOKEN.PLUS_PLUS) || this.check(TOKEN.MINUS_MINUS)) {
+      this.advance();
+      this.bag.add(
+        "expected a variable name before the increment operator",
+        this.previous.location,
+        ["the loop update is written as an expression, for example: i++"],
+      );
+      return null;
+    }
+    return this.parseExpression();
+  }
+
+  /**
+   * `i++;` and `i--;`, which are statements and not expressions.
+   *
+   * There is no post-increment value to hand back, so this desugars to an
+   * expression statement assigning `i = i + 1`.
+   *
+   * `--` is only a decrement when it directly follows a name. Written any other
+   * way it stays the unary minus it has always been, so `--1` is still 1 — the
+   * documented reading of a doubled negation. A statement ends in `;` or a loop
+   * header's `)`, which is what tells `i--;` from `- -1`.
+   */
+  private parseIncrement(): Statement | null {
+    const name = this.advance();
+    const op = this.advance();
+    if (!this.expect(TOKEN.SEMICOLON, "';' at the end of the statement")) return null;
+    const value = this.buildCompoundAssignment(name, op.kind === TOKEN.PLUS_PLUS ? "+" : "-", {
+      kind: "numberLiteral",
+      value: 1,
+      location: name.location,
+    });
+    return { kind: "expressionStmt", expression: value, location: name.location };
+  }
+
+  /** A leading `++` or `--` with no variable in front of it. */
+  private parseBareIncrement(): Statement | null {
+    this.advance();
+    this.bag.add(
+      "expected a variable name before the increment operator",
+      this.previous.location,
+      ["write it as a statement, for example: i++;"],
+    );
+    this.synchronize();
+    return null;
   }
 
   private parseBlock(): Block | null {
@@ -402,7 +491,7 @@ class Parser {
       this.synchronize();
       return null;
     }
-    const update = this.check(TOKEN.RIGHT_PAREN) ? null : this.parseExpression();
+    const update = this.check(TOKEN.RIGHT_PAREN) ? null : this.parseForUpdate();
     if (!this.expect(TOKEN.RIGHT_PAREN, "')' after the loop update")) {
       this.synchronize();
       return null;
@@ -524,6 +613,7 @@ class Parser {
 
   private parseExpressionStatement(): Statement | null {
     const expression = this.parseExpression();
+    if (this.reportIncrementInExpression(expression)) return null;
     const semi = this.expect(TOKEN.SEMICOLON, "';' after the expression");
     if (!expression || !semi) {
       this.synchronize();
@@ -534,6 +624,26 @@ class Parser {
       expression,
       location: span(expression.location, semi.location),
     };
+  }
+
+  /**
+   * Report `++`/`--` written where a value was expected, and say why.
+   *
+   * These are statements, so the generic "expected ';'" that would otherwise
+   * appear is accurate but unhelpful: it does not say that the problem is the
+   * missing value, only that a semicolon is missing too. Returns true when it
+   * reported, so both call sites can bail out.
+   */
+  private reportIncrementInExpression(expression: Expression | null): boolean {
+    if (!expression || !(this.check(TOKEN.PLUS_PLUS) || this.check(TOKEN.MINUS_MINUS))) return false;
+    const op = this.advance();
+    this.bag.add(
+      `'${op.lexeme}' is a statement and has no value, so it cannot be used in an expression`,
+      op.location,
+      ["write it on its own line, for example: i++;"],
+    );
+    this.synchronize();
+    return true;
   }
 
   // -------------------------------------------------------------- expressions
@@ -547,6 +657,11 @@ class Parser {
    * shape from the tokens directly, rather than building a general expression and
    * validating it afterwards, is what lets `a + 1 = 2` produce one clear error
    * instead of a confusing cascade.
+   *
+   * Compound assignment is desugared here, into the same node a plain `x = x + y`
+   * would produce. Nothing downstream — the checker, the interpreter, the AST
+   * printer — knows that `+=` exists, which is the whole reason it is cheap to
+   * add: a new operator that means nothing new.
    */
   private parseAssignment(): Expression | null {
     if (this.check(TOKEN.IDENT) && this.peek(1).kind === TOKEN.EQUAL) {
@@ -562,7 +677,48 @@ class Parser {
         location: span(name.location, value.location),
       };
     }
+
+    const compound = COMPOUND_ASSIGNMENT.get(this.peek(1).kind);
+    if (this.check(TOKEN.IDENT) && compound) {
+      const name = this.advance();
+      this.advance(); // '+=', '-=', ...
+      const value = this.parseAssignment();
+      if (!value) return null;
+      return this.buildCompoundAssignment(name, compound, value);
+    }
+
     return this.parseBinary(BP.none);
+  }
+
+  /**
+   * Build `name = name <op> value` for a compound assignment. The left operand is
+   * a fresh `Variable` node rather than the assignment's own target, because the
+   * target is a name and an expression is what the binary operator needs.
+   */
+  private buildCompoundAssignment(
+    name: Token,
+    operator: BinaryOperator,
+    value: Expression,
+  ): Expression {
+    const target: Variable = {
+      kind: "variable",
+      name: name.lexeme,
+      location: name.location,
+    };
+    const binary: BinaryExpression = {
+      kind: "binary",
+      operator,
+      left: target,
+      right: value,
+      location: span(name.location, value.location),
+    };
+    return {
+      kind: "assignment",
+      name: name.lexeme,
+      nameLocation: name.location,
+      value: binary,
+      location: span(name.location, value.location),
+    };
   }
 
   /**
@@ -675,19 +831,30 @@ class Parser {
         break;
 
       case TOKEN.BANG:
-      case TOKEN.MINUS: {
+      case TOKEN.MINUS:
+      case TOKEN.MINUS_MINUS: {
         this.advance();
         // Recursing into parsePrefix means the operand is itself a full unary
         // expression, which is what makes `--x` and `!a == b` come out right.
+        //
+        // `--` reaches here only in prefix position, where it is two minuses and
+        // not a decrement: `i--` is a decrement, but `--1` is 1 and `---1` is -1,
+        // which is what the language has always documented. A doubled minus is
+        // therefore a nested unary over the same operand.
         const operand = this.parsePrefix();
         if (!operand) return null;
         const operator: UnaryOperator = token.kind === TOKEN.BANG ? "!" : "-";
-        expr = {
-          kind: "unary",
-          operator,
-          operand,
-          location: span(token.location, operand.location),
-        };
+        const location = span(token.location, operand.location);
+        if (token.kind === TOKEN.MINUS_MINUS) {
+          expr = {
+            kind: "unary",
+            operator: "-",
+            operand: { kind: "unary", operator: "-", operand, location },
+            location,
+          };
+          break;
+        }
+        expr = { kind: "unary", operator, operand, location };
         break;
       }
 
@@ -707,21 +874,40 @@ class Parser {
         return null;
     }
 
-    // Call suffixes are applied here, after the prefix operator, so they bind
-    // tighter than everything. Doing this in parsePrefix rather than in the
+    // Call and index suffixes are applied here, after the prefix operator, so they
+    // bind tighter than everything. Doing this in parsePrefix rather than in the
     // binary loop is what makes `-f(1)` mean `-(f(1))` and not `(-f)(1)`.
-    while (this.check(TOKEN.LEFT_PAREN)) {
-      this.advance();
-      const args = this.parseArguments();
-      if (!args) return null;
-      expr = {
-        kind: "call",
-        callee: expr,
-        args,
-        location: span(expr.location, this.previous.location),
-      };
+    //
+    // Both suffixes share one loop so they chain freely: `f()[0]` and `s[0][1]`
+    // parse the same way `f()(1)` and `s(1)(2)` do.
+    for (;;) {
+      if (this.check(TOKEN.LEFT_PAREN)) {
+        this.advance();
+        const args = this.parseArguments();
+        if (!args) return null;
+        expr = {
+          kind: "call",
+          callee: expr,
+          args,
+          location: span(expr.location, this.previous.location),
+        };
+        continue;
+      }
+      if (this.check(TOKEN.LEFT_BRACKET)) {
+        this.advance();
+        const index = this.parseExpression();
+        if (!this.expect(TOKEN.RIGHT_BRACKET, "']' to close the index")) return null;
+        if (!index) return null;
+        expr = {
+          kind: "index",
+          target: expr,
+          index,
+          location: span(expr.location, this.previous.location),
+        };
+        continue;
+      }
+      return expr;
     }
-    return expr;
   }
 }
 

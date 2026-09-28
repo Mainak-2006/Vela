@@ -51,6 +51,7 @@ export type Type =
   | BoolType
   | VoidType
   | FunctionType
+  | AnyFunctionType
   | ErrorType
   | AnyType;
 
@@ -65,6 +66,23 @@ export function functionType(params: readonly Type[], returnType: Type): Functio
   return { kind: "function", params, returnType };
 }
 
+/**
+ * The bare `function` type, for a variable that holds a function of any
+ * signature.
+ *
+ * This is deliberately weaker than a `FunctionType`. Naming the parameters and
+ * the return type would check the call site, but it would also mean a function
+ * value can only be stored in a variable of exactly one signature, which is the
+ * friction that makes people reach for a language with proper generics. The
+ * tradeoff is stated plainly in the diagnostic below: storing a function is
+ * checked, calling it through a `function`-typed variable is not.
+ */
+export interface AnyFunctionType {
+  readonly kind: "anyFunction";
+}
+
+export const anyFunctionType: AnyFunctionType = { kind: "anyFunction" };
+
 export function primitiveType(name: PrimitiveTypeName): Type {
   switch (name) {
     case "number":
@@ -75,6 +93,8 @@ export function primitiveType(name: PrimitiveTypeName): Type {
       return boolType;
     case "void":
       return voidType;
+    case "function":
+      return anyFunctionType;
   }
 }
 
@@ -105,6 +125,12 @@ export function typesEqual(a: Type, b: Type): boolean {
 export function isAssignable(target: Type, value: Type): boolean {
   if (target.kind === "error" || value.kind === "error") return true;
   if (target.kind === "any" || value.kind === "any") return true;
+  // A specific function satisfies the bare `function` type, and a bare function
+  // value satisfies the bare type too. What the bare type never satisfies is a
+  // concrete signature: doing that would claim knowledge of parameters and a
+  // return type that were deliberately thrown away.
+  if (target.kind === "anyFunction") return value.kind === "function" || value.kind === "anyFunction";
+  if (value.kind === "anyFunction") return false;
   return typesEqual(target, value);
 }
 
@@ -113,6 +139,8 @@ export function typeToString(type: Type): string {
   switch (type.kind) {
     case "function":
       return `fn(${type.params.map(typeToString).join(", ")}) -> ${typeToString(type.returnType)}`;
+    case "anyFunction":
+      return "function";
     case "any":
       return "any";
     case "error":
