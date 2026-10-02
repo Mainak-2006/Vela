@@ -174,6 +174,41 @@ describe("interpreter: variables and scope", () => {
   });
 });
 
+describe("interpreter: const declarations", () => {
+  it("binds and reads a global const", () => {
+    assert.equal(printed("const K: number = 5;\nprint(K);"), "5");
+  });
+
+  it("binds a const in a block", () => {
+    assert.equal(printed("{ const K: string = \"in\"; print(K); }"), "in");
+  });
+
+  it("binds a const in a for header", () => {
+    // The loop variable is scoped to the loop, exactly as a `let` header is.
+    const { output, env } = run("let n: number = 0;\nfor (const j: number = 2; n < 2; ) { print(j); n = n + 1; }");
+    assert.deepEqual(output, ["2", "2"]);
+    assert.equal(env.get("j"), undefined);
+  });
+
+  it("stores a const in the environment like any other binding", () => {
+    // Nothing about the runtime differs between `let` and `const`. The rule is the
+    // checker's, so the value is an ordinary binding here — which is what makes the
+    // guarantee a compile-time one rather than a property of the value.
+    const { env } = run("const K: number = 5;");
+    assert.equal(env.get("K")?.kind, "number");
+  });
+
+  it("does not enforce the const at runtime when the checker is bypassed", () => {
+    // `run` type-checks, so reaching the interpreter with a const reassignment is
+    // impossible through the normal pipeline. Going around the checker through the
+    // environment is the only way to see it, and it pins down that the guarantee is
+    // the checker's rather than something the runtime repeats.
+    const { env } = run("const K: number = 1;");
+    assert.equal(env.assign("K", { kind: "number", value: 2 }), true);
+    assert.equal(env.get("K")?.kind, "number");
+  });
+});
+
 describe("interpreter: functions", () => {
   it("calls a function with arguments", () => {
     assert.equal(printed("fn add(a: number, b: number): number { return a + b; }\nprint(add(2, 3));"), "5");
@@ -263,6 +298,80 @@ describe("interpreter: functions", () => {
     assert.equal(
       printed("fn f(): number { return 1; }\n{ fn f(): number { return 2; } print(f()); }\nprint(f());"),
       "2\n1",
+    );
+  });
+});
+
+describe("interpreter: functions held in variables", () => {
+  it("calls through a signature-typed variable", () => {
+    // The signature is a compile-time guarantee; at runtime the variable holds
+    // the same closure a direct call would reach, so the value is identical.
+    assert.equal(
+      printed("fn d(x: number): number { return x * 2; }\nlet f: fn(number) -> number = d;\nprint(tostring(f(21)));"),
+      "42",
+    );
+  });
+
+  it("passes a function through a signature-typed parameter and return", () => {
+    assert.equal(
+      printed(`
+        fn d(x: number): number { return x * 2; }
+        fn apply(f: fn(number) -> number, v: number): fn(number) -> number { return f; }
+        print(tostring(apply(d, 1)(50)));
+      `),
+      "100",
+    );
+  });
+
+  it("calls a `void` signature through a parameter", () => {
+    assert.equal(
+      printed(`
+        fn note(text: string): void { print(text); }
+        fn run(action: fn(string) -> void, s: string): void { action(s); }
+        run(note, "ran");
+      `),
+      "ran",
+    );
+  });
+
+  it("reports a signature-typed value as a function at runtime", () => {
+    // `typeOf` sees the runtime value, not the annotation, so a signature-typed
+    // variable reports "function" exactly as a bare one does.
+    assert.equal(
+      printed('fn d(): void { }\nlet f: fn() -> void = d;\nprint(typeOf(f));'),
+      "function",
+    );
+  });
+
+  it("still holds the real function, so the call applies the original body", () => {
+    // The type says `fn(number) -> number` and the value really is `double`. A
+    // checker that trusted the annotation instead of the value would print 1.
+    assert.equal(
+      printed("fn double(x: number): number { return x * 2; }\nlet f: fn(number) -> number = double;\nprint(tostring(f(3)));"),
+      "6",
+    );
+  });
+
+  it("runs a returned signature-typed closure in its defining scope", () => {
+    // `outer` returns a function declared inside its own body, so the closure it
+    // was defined in is still the one that runs when the result is called with 4.
+    // The annotation says which signature that closure has; it does not create it.
+    assert.equal(
+      printed(`
+        fn makeAdder(n: number): fn(number) -> number {
+          fn addTo(x: number): number { return x + n; }
+          return addTo;
+        }
+        print(tostring(makeAdder(3)(4)));
+      `),
+      "7",
+    );
+  });
+
+  it("uses a nested signature recursively", () => {
+    assert.equal(
+      printed("fn twice(f: fn(number) -> number, v: number): number { return f(f(v)); }\nfn inc(x: number): number { return x + 1; }\nprint(tostring(twice(inc, 1)));"),
+      "3",
     );
   });
 });
@@ -603,6 +712,837 @@ describe("interpreter: built-ins", () => {
   });
 });
 
+describe("interpreter: string built-ins", () => {
+  it("changes case", () => {
+    assert.equal(printed('print(upper("aBc"));\nprint(lower("aBc"));'), "ABC\nabc");
+  });
+
+  it("maps case by Unicode, so the result can be longer than the input", () => {
+    // "ß" upper-cases to "SS", which is two characters. An ASCII table would leave
+    // it alone. The test exists because the length change is observable and the
+    // documentation promises it.
+    assert.equal(printed('print(upper("straße"));'), "STRASSE");
+  });
+
+  it("trims whitespace from both ends", () => {
+    assert.equal(printed('print("[" + trim("  a b\\t") + "]");'), "[a b]");
+    assert.equal(printed('print("[" + trim("abc") + "]");'), "[abc]");
+  });
+
+  it("takes the subject first in startsWith and endsWith", () => {
+    assert.equal(
+      printed(
+        'print(tostring(startsWith("hello", "he")));\nprint(tostring(startsWith("hello", "lo")));\nprint(tostring(endsWith("hello", "lo")));\nprint(tostring(endsWith("hello", "he")));',
+      ),
+      "true\nfalse\ntrue\nfalse",
+    );
+  });
+
+  it("answers -1 when indexOf finds nothing", () => {
+    assert.equal(
+      printed('print(tostring(indexOf("hello", "ll")));\nprint(tostring(indexOf("hello", "z")));'),
+      "2\n-1",
+    );
+  });
+
+  it("finds an empty needle at 0, which is a real answer", () => {
+    assert.equal(printed('print(tostring(indexOf("hello", "")));'), "0");
+  });
+
+  it("takes a substring", () => {
+    assert.equal(printed('print(substr("hello", 1, 3));'), "ell");
+  });
+
+  it("clamps substr rather than failing", () => {
+    // Every one of these is a boundary a caller can reach by accident, and an empty
+    // string is a better answer than a runtime error for text that is being built.
+    assert.equal(printed('print("[" + substr("hello", 2, 99) + "]");'), "[llo]");
+    assert.equal(printed('print("[" + substr("hello", 9, 2) + "]");'), "[]");
+    assert.equal(printed('print("[" + substr("hello", 1, 0 - 1) + "]");'), "[]");
+  });
+
+  it("counts a negative substr start from the end", () => {
+    assert.equal(printed('print("[" + substr("hello", 0 - 2, 2) + "]");'), "[lo]");
+  });
+
+  it("repeats a string, truncating a fractional count", () => {
+    assert.equal(printed('print(repeat("ab", 3));'), "ababab");
+    assert.equal(printed('print("[" + repeat("ab", 0) + "]");'), "[]");
+    assert.equal(printed('print(repeat("ab", 2.9));'), "abab");
+  });
+
+  it("replaces the first occurrence only", () => {
+    assert.equal(printed('print(replace("a-b-c", "-", "+"));'), "a+b-c");
+  });
+
+  it("leaves the string alone when there is nothing to replace", () => {
+    assert.equal(printed('print(replace("a-b-c", "z", "+"));'), "a-b-c");
+  });
+
+  it("leaves the string alone when the needle is empty", () => {
+    // Inserting at "every position" in an empty gap is not a useful answer, so this
+    // is a no-op rather than JavaScript's append-the-replacement behaviour.
+    assert.equal(printed('print(replace("abc", "", "+"));'), "abc");
+  });
+
+  it("keeps every string built-in total, so none of them can fail", () => {
+    // A single expression that touches every one of them, including on the empty
+    // string and with zero and negative arguments. Nothing here should throw.
+    const text = [
+      'print(upper("") + lower("") + trim(""));',
+      'print(tostring(startsWith("", "")) + " " + tostring(endsWith("", "")));',
+      'print(tostring(indexOf("", "a")));',
+      'print("[" + substr("", 0, 5) + "]");',
+      'print("[" + repeat("", 3) + "]");',
+      'print("[" + replace("", "a", "b") + "]");',
+    ].join("\n");
+    assert.equal(printed(text), "\ntrue true\n-1\n[]\n[]\n[]");
+  });
+});
+
+describe("interpreter: structs", () => {
+  it("builds a value and reads a field", () => {
+    assert.equal(
+      printed(`
+        struct Point { x: number; y: number; }
+        let p: Point = Point(3, 4);
+        print(p.x);
+        print(p.y);
+      `),
+      "3\n4",
+    );
+  });
+
+  it("prints a struct by name and fields", () => {
+    assert.equal(
+      printed(`
+        struct Point { x: number; y: number; }
+        print(Point(1, 2));
+      `),
+      "Point(x: 1, y: 2)",
+    );
+  });
+
+  it("prints a nested struct nested", () => {
+    assert.equal(
+      printed(`
+        struct A { n: number; }
+        struct B { a: A; xs: number[]; }
+        print(B(A(1), [2, 3]));
+      `),
+      "B(a: A(n: 1), xs: [2, 3])",
+    );
+  });
+
+  it("reports a struct by its own name from typeOf", () => {
+    assert.equal(
+      printed(`
+        struct Marker {}
+        print(typeOf(Marker()));
+      `),
+      "Marker",
+    );
+  });
+
+  it("writes a field, in place, for the one value that holds it", () => {
+    assert.equal(
+      printed(`
+        struct P { x: number; }
+        let p: P = P(1);
+        p.x = 2;
+        p.x += 3;
+        print(p.x);
+      `),
+      "5",
+    );
+  });
+
+  it("writes a field through an index", () => {
+    assert.equal(
+      printed(`
+        struct P { x: number; }
+        let ps: P[] = [P(1), P(2)];
+        ps[1].x = 9;
+        print(ps[1].x);
+      `),
+      "9",
+    );
+  });
+
+  it("writes an element of an array reached through a field", () => {
+    assert.equal(
+      printed(`
+        struct B { xs: number[]; }
+        let b: B = B([1, 2]);
+        b.xs[1] = 9;
+        print(b.xs);
+      `),
+      "[1, 9]",
+    );
+  });
+
+  it("builds a struct declared below its use", () => {
+    assert.equal(
+      printed(`
+        let p: Point = Point(1, 2);
+        struct Point { x: number; y: number; }
+        print(p.y);
+      `),
+      "2",
+    );
+  });
+
+  describe("value semantics", () => {
+    it("copies on assignment, so a second name is a second value", () => {
+      assert.equal(
+        printed(`
+          struct P { x: number; }
+          let p: P = P(1);
+          let q: P = p;
+          q.x = 2;
+          print(tostring(p.x) + " " + tostring(q.x));
+        `),
+        "1 2",
+      );
+    });
+
+    it("copies through a nested struct", () => {
+      assert.equal(
+        printed(`
+          struct Inner { n: number; }
+          struct Outer { inner: Inner; }
+          let o: Outer = Outer(Inner(1));
+          o.inner.n = 2;
+          print(tostring(o.inner.n));
+        `),
+        "2",
+      );
+    });
+
+    it("copies an array held in a field, so the copy owns it", () => {
+      assert.equal(
+        printed(`
+          struct B { xs: number[]; }
+          let b: B = B([1, 2]);
+          let c: B = b;
+          c.xs[0] = 9;
+          print(b.xs);
+        `),
+        "[1, 2]",
+      );
+    });
+
+    it("copies into an array element, so two names never share a struct", () => {
+      assert.equal(
+        printed(`
+          struct P { x: number; }
+          let p: P = P(1);
+          let ps: P[] = [p];
+          ps[0].x = 2;
+          print(p.x);
+        `),
+        "1",
+      );
+    });
+
+    it("copies on an argument, so a callee cannot change the caller's struct", () => {
+      assert.equal(
+        printed(`
+          struct P { x: number; }
+          fn bump(p: P): void { p.x = 99; }
+          let p: P = P(1);
+          bump(p);
+          print(p.x);
+        `),
+        "1",
+      );
+    });
+
+    it("copies a returned struct, so the caller owns what it gets", () => {
+      assert.equal(
+        printed(`
+          struct P { x: number; }
+          let p: P = P(1);
+          fn keep(q: P): P { return q; }
+          p.x = 5;
+          let r: P = keep(p);
+          r.x = 7;
+          print(tostring(p.x) + " " + tostring(r.x));
+        `),
+        "5 7",
+      );
+    });
+
+    it("still shares an array bound on its own", () => {
+      // The two rules are about different values: an array *is* a reference, and
+      // binding one shares it. Only a struct copies what it contains.
+      assert.equal(
+        printed(`
+          let xs: number[] = [1];
+          let ys: number[] = xs;
+          ys[0] = 9;
+          print(xs[0]);
+        `),
+        "9",
+      );
+    });
+
+    it("still shares an array bound out of a field", () => {
+      assert.equal(
+        printed(`
+          struct B { xs: number[]; }
+          let b: B = B([1]);
+          let ys: number[] = b.xs;
+          ys[0] = 9;
+          print(b.xs[0]);
+        `),
+        "9",
+      );
+    });
+  });
+
+  it("compares by fields, so a copy equals what it was copied from", () => {
+    assert.equal(
+      printed(`
+        struct P { x: number; }
+        let p: P = P(1);
+        let q: P = p;
+        print(tostring(p == p));
+        print(tostring(p == q));
+        print(tostring(P(1) == P(1)));
+        print(tostring(P(1) == P(2)));
+      `),
+      "true\ntrue\ntrue\nfalse",
+    );
+  });
+
+  it("compares nested structs by their fields", () => {
+    assert.equal(
+      printed(`
+        struct A { n: number; }
+        struct B { a: A; }
+        print(tostring(B(A(1)) == B(A(1))));
+        print(tostring(B(A(1)) == B(A(2))));
+      `),
+      "true\nfalse",
+    );
+  });
+
+  it("compares an array inside a struct by reference, as it does anywhere else", () => {
+    assert.equal(
+      printed(`
+        struct B { xs: number[]; }
+        let xs: number[] = [1];
+        print(tostring(B(xs) == B(xs)));
+        print(tostring(B([1]) == B([1])));
+      `),
+      "true\nfalse",
+    );
+  });
+
+  it("keeps an empty struct printable and comparable", () => {
+    assert.equal(
+      printed(`
+        struct Marker {}
+        let a: Marker = Marker();
+        let b: Marker = Marker();
+        print(a);
+        print(tostring(a == a));
+        print(tostring(a == b));
+      `),
+      "Marker()\ntrue\ntrue",
+    );
+  });
+
+  it("registers a struct declared after its first use", () => {
+    // The interpreter registers every struct before running anything, so the order
+    // of the declaration does not decide whether a call can be built.
+    assert.equal(
+      printed(`
+        fn make(): P { return P(7); }
+        struct P { x: number; }
+        print(make().x);
+      `),
+      "7",
+    );
+  });
+
+  it("rejects a field read from something that is not a struct", () => {
+    assert.throws(
+      () => runUnchecked("let n: number = 1;\nprint(n.x);").join(""),
+      (error: unknown) => {
+        assert.ok(error instanceof RuntimeError);
+        assert.match(error.message, /has no fields/);
+        return true;
+      },
+    );
+  });
+
+  it("rejects a field write to something that is not a struct", () => {
+    assert.throws(
+      () => runUnchecked('let s: string = "a";\ns.x = 1;').join(""),
+      (error: unknown) => {
+        assert.ok(error instanceof RuntimeError);
+        assert.match(error.message, /cannot assign a field of a value of type 'string'/);
+        return true;
+      },
+    );
+  });
+
+  it("rejects calling a struct value", () => {
+    assert.throws(
+      () => runUnchecked("struct P { x: number; }\nlet p: P = P(1);\np();").join(""),
+      (error: unknown) => {
+        assert.ok(error instanceof RuntimeError);
+        assert.match(error.message, /not a function/);
+        return true;
+      },
+    );
+  });
+});
+
+describe("interpreter: null", () => {
+  it("prints null as 'null'", () => {
+    assert.equal(printed("let x: number? = null;\nprint(x);"), "null");
+  });
+
+  it("compares null with null and with an absent value", () => {
+    assert.equal(
+      printed(`
+        let a: number? = null;
+        let b: number? = 1;
+        print(tostring(a == null));
+        print(tostring(b == null));
+        print(tostring(null == null));
+        print(tostring(null != b));
+      `),
+      "true\nfalse\ntrue\ntrue",
+    );
+  });
+
+  it("compares a nullable holding a value by value, not by presence", () => {
+    assert.equal(
+      printed(`
+        let a: number? = 1;
+        let b: number? = 1;
+        print(tostring(a == b));
+      `),
+      "true",
+    );
+  });
+
+  it("reports null as its own type, and a nullable by what it holds", () => {
+    // A nullable type is not a type the runtime knows about — it is a promise about
+    // what may be stored — so `typeOf` reports the value it is asked about.
+    assert.equal(
+      printed(`
+        let a: number? = null;
+        let b: number? = 1;
+        print(typeOf(a));
+        print(typeOf(b));
+        print(typeOf(null));
+      `),
+      "null\nnumber\nnull",
+    );
+  });
+
+  it("passes null through tostring and tonumber", () => {
+    assert.equal(printed("print(tostring(null));\nprint(tostring(tonumber(null)));"), "null\n0");
+  });
+
+  it("stores and reads a null field of a struct", () => {
+    assert.equal(
+      printed(`
+        struct Node { value: number; next: Node?; }
+        let a: Node = Node(1, null);
+        print(tostring(a.next == null));
+        let b: Node = Node(2, a);
+        if (b.next != null) { print(tostring(b.next.value)); }
+        print(b);
+      `),
+      "true\n1\nNode(value: 2, next: Node(value: 1, next: null))",
+    );
+  });
+
+  it("short-circuits a guard so the right operand is not evaluated", () => {
+    // The narrowing is what makes the guard writable; the short-circuit is what makes
+    // it safe, and both are properties of the same expression.
+    assert.equal(
+      printed(`
+        struct Node { value: number; next: Node?; }
+        let b: Node = Node(1, null);
+        fn use(): number { print("evaluated"); return 1; }
+        if (b.next != null && use() == 1) { print("both"); }
+      `),
+      "",
+    );
+    assert.equal(
+      printed(`
+        struct Node { value: number; next: Node?; }
+        let b: Node = Node(1, null);
+        fn use(): number { print("evaluated"); return 1; }
+        if (b.next == null || use() == 1) { print("first was enough"); }
+      `),
+      "first was enough",
+    );
+  });
+
+  it("does not evaluate the right operand of || when the left is true", () => {
+    assert.equal(
+      printed(`
+        let a: number? = null;
+        fn boom(): number { return 1; }
+        if (a == null || boom() == 1) { print("reached"); }
+      `),
+      "reached",
+    );
+  });
+
+  it("assigns null over a value and back", () => {
+    assert.equal(
+      printed(`
+        let x: number? = 1;
+        print(tostring(x != null));
+        x = null;
+        print(tostring(x == null));
+      `),
+      "true\ntrue",
+    );
+  });
+
+  it("keeps the two answers of a null test apart through a while loop", () => {
+    assert.equal(
+      printed(`
+        fn count(n: number?): number {
+          let total: number = 0;
+          let i: number = 0;
+          while (i < 3) {
+            if (n == null) { i = i + 1; } else { total = total + n; i = i + 1; }
+          }
+          return total;
+        }
+        print(tostring(count(null)));
+        print(tostring(count(4)));
+      `),
+      "0\n12",
+    );
+  });
+});
+
+describe("interpreter: optional struct fields", () => {
+  const CONFIG = "struct Config { retries: number; label?: string; note?: string; }";
+
+  it("stores null where an argument was left out", () => {
+    assert.equal(
+      printed(`${CONFIG}\nprint(Config(3));`),
+      "Config(retries: 3, label: null, note: null)",
+    );
+  });
+
+  it("fills the omitted fields from the end, keeping the ones given", () => {
+    // Two arguments fill the two required fields in order; the third is absent. The
+    // padding is at the end precisely because the optional fields are a suffix.
+    assert.equal(
+      printed(`${CONFIG}\nprint(Config(3, "prod"));\nprint(Config(3, "prod", "written"));`),
+      "Config(retries: 3, label: prod, note: null)\nConfig(retries: 3, label: prod, note: written)",
+    );
+  });
+
+  it("accepts null for an optional field given as an argument", () => {
+    assert.equal(printed(`${CONFIG}\nprint(Config(3, null, "here"));`), "Config(retries: 3, label: null, note: here)");
+  });
+
+  it("fills every field of a struct whose fields are all optional", () => {
+    assert.equal(printed("struct All { a?: number; b?: string; }\nprint(All());"), "All(a: null, b: null)");
+  });
+
+  it("writes the field and reads back what was written", () => {
+    assert.equal(
+      printed(`
+        ${CONFIG}
+        let c: Config = Config(3);
+        c.label = "set";
+        print(tostring(c.label));
+        c.label = null;
+        print(tostring(c.label == null));
+      `),
+      "set\ntrue",
+    );
+  });
+
+  it("compares two structs field by field, absence included", () => {
+    // Two structs built the same way are equal whether the absence came from leaving
+    // the argument out or from passing `null` — which is the point of making omission
+    // mean `null` rather than something else.
+    assert.equal(
+      printed(`${CONFIG}\nprint(tostring(Config(3) == Config(3, null, null)));\nprint(tostring(Config(3) == Config(4)));`),
+      "true\nfalse",
+    );
+  });
+
+  it("copies an omitted field like any other", () => {
+    assert.equal(
+      printed(`
+        ${CONFIG}
+        let a: Config = Config(3, "x");
+        let b: Config = a;
+        b.label = null;
+        print(tostring(a.label));
+      `),
+      "x",
+    );
+  });
+
+  it("stores an omitted field as null inside an array of structs", () => {
+    assert.equal(printed(`${CONFIG}\nlet cs: Config[] = [Config(1), Config(2, "b")];\nprint(cs);`), "[Config(retries: 1, label: null, note: null), Config(retries: 2, label: b, note: null)]");
+  });
+
+  it("passes an omitted field through a function like any other argument", () => {
+    assert.equal(
+      printed(`
+        ${CONFIG}
+        fn retriesOf(c: Config): number { return c.retries; }
+        fn labelled(c: Config): string {
+          if (c.label != null) { return c.label; }
+          return "none";
+        }
+        print(tostring(retriesOf(Config(3))));
+        print(labelled(Config(3)));
+        print(labelled(Config(3, "set")));
+      `),
+      "3\nnone\nset",
+    );
+  });
+
+  it("builds a recursive chain from optional fields", () => {
+    assert.equal(
+      printed(`
+        struct Node { value: number; next?: Node; }
+        fn total(from: Node?): number {
+          let sum: number = 0;
+          for (let at: Node? = from; at != null; at = at.next) { sum = sum + at.value; }
+          return sum;
+        }
+        print(tostring(total(Node(1, Node(2, Node(3))))));
+        print(tostring(total(Node(9))));
+      `),
+      "6\n9",
+    );
+  });
+});
+
+describe("interpreter: arrays", () => {
+  it("builds a literal and prints it", () => {
+    assert.equal(printed("print([1, 2, 3]);"), "[1, 2, 3]");
+    assert.equal(printed('print(["a", "b"]);'), "[a, b]");
+    assert.equal(printed("print([true, false]);"), "[true, false]");
+  });
+
+  it("appends without changing the array it was given", () => {
+    // The one way to build an array whose length is only known while running. It
+    // returns a new array, so an array's length never changes once it exists.
+    assert.equal(
+      printed(`
+        let xs: number[] = [1, 2];
+        let ys: number[] = append(xs, 3);
+        print(ys);
+        print(xs);
+        print(len(ys));
+      `),
+      "[1, 2, 3]\n[1, 2]\n3",
+    );
+  });
+
+  it("appends to an empty array", () => {
+    assert.equal(printed('let xs: string[] = [];\nprint(append(xs, "a"));'), "[a]");
+  });
+
+  it("appends an array, keeping its nesting", () => {
+    assert.equal(printed("let xs: number[][] = [[1]];\nprint(append(xs, [2, 3]));"), "[[1], [2, 3]]");
+  });
+
+  it("prints nested arrays", () => {
+    assert.equal(printed("let g: number[][] = [[1, 2], [3, 4]];\nprint(g);"), "[[1, 2], [3, 4]]");
+    assert.equal(printed("let g: number[][] = [[], [1]];\nprint(g);"), "[[], [1]]");
+  });
+
+  it("evaluates elements left to right", () => {
+    // The order is observable, so it is worth a test: a literal is a value like
+    // any other, and its elements are ordinary expressions.
+    assert.equal(
+      printed(`
+        let log: string = "";
+        fn note(ch: string): number { log = log + ch; return 1; }
+        let xs: number[] = [note("a"), note("b"), note("c")];
+        print(log);
+      `),
+      "abc",
+    );
+  });
+
+  it("reads an element", () => {
+    assert.equal(printed("let xs: number[] = [10, 20, 30];\nprint(xs[0]);\nprint(xs[2]);"), "10\n30");
+    assert.equal(printed('let xs: string[] = ["a", "b"];\nprint(xs[1]);'), "b");
+    assert.equal(printed("let g: number[][] = [[1, 2]];\nprint(g[0][1]);"), "2");
+  });
+
+  it("measures an array with len", () => {
+    assert.equal(printed("let xs: number[] = [1, 2, 3];\nprint(len(xs));"), "3");
+    assert.equal(printed("let xs: number[] = [];\nprint(len(xs));"), "0");
+  });
+
+  it("writes an element", () => {
+    assert.equal(printed("let xs: number[] = [1, 2];\nxs[0] = 9;\nprint(xs);"), "[9, 2]");
+    assert.equal(printed('let xs: string[] = ["a"];\nxs[0] = "b";\nprint(xs);'), "[b]");
+  });
+
+  it("writes through a chained index", () => {
+    assert.equal(
+      printed("let g: number[][] = [[1, 2], [3, 4]];\ng[0][1] = 9;\nprint(g);"),
+      "[[1, 9], [3, 4]]",
+    );
+  });
+
+  it("applies a compound assignment to an element", () => {
+    assert.equal(
+      printed(`
+        let xs: number[] = [1, 2, 3];
+        xs[0] += 10; xs[1] -= 1; xs[2] *= 4;
+        print(xs);
+      `),
+      "[11, 1, 12]",
+    );
+  });
+
+  it("evaluates an index assignment to the stored value", () => {
+    assert.equal(printed("let xs: number[] = [1];\nprint(xs[0] = 5);"), "5");
+  });
+
+  it("shares one array between two names", () => {
+    // The reference, not a copy: a write through either name is visible through
+    // both. This is what makes an array a value with identity.
+    assert.equal(
+      printed(`
+        let xs: number[] = [1, 2];
+        let ys: number[] = xs;
+        ys[0] = 99;
+        print(xs);
+      `),
+      "[99, 2]",
+    );
+  });
+
+  it("shares an array with the function it was passed to", () => {
+    // A parameter is the same reference, not a copy, so a function that writes
+    // through it is a way to fill an array in place.
+    assert.equal(
+      printed(`
+        fn fill(xs: number[], from: number): void {
+          for (let i: number = 0; i < len(xs); i = i + 1) { xs[i] = from + i; }
+        }
+        let xs: number[] = [0, 0, 0];
+        fill(xs, 5);
+        print(xs);
+      `),
+      "[5, 6, 7]",
+    );
+  });
+
+  it("compares arrays by identity, not by contents", () => {
+    assert.equal(
+      printed(`
+        let xs: number[] = [1, 2];
+        let ys: number[] = xs;
+        print(xs == ys);
+        print(xs == [1, 2]);
+        print([1] == [1]);
+        let zs: number[] = [1, 2];
+        print(xs == zs);
+      `),
+      "true\nfalse\nfalse\nfalse",
+    );
+  });
+
+  it("stores whatever a function returned", () => {
+    assert.equal(
+      printed(`
+        fn pair(a: number, b: number): number[] { return [a, b]; }
+        let xs: number[] = pair(1, 2);
+        print(xs[0] + xs[1]);
+        print(len(pair(7, 8)));
+      `),
+      "3\n2",
+    );
+  });
+
+  it("sums, reverses, and builds an array whose length is computed", () => {
+    // No `for...of` and no collection library: every array operation is a loop
+    // over indexes, which is the whole reason the type is worth having. Note that
+    // `reverse` cannot write into `out` as it goes — an empty array has nothing to
+    // write *into* — so it appends and reassigns instead.
+    assert.equal(
+      printed(`
+        fn total(xs: number[]): number {
+          let sum: number = 0;
+          for (let i: number = 0; i < len(xs); i = i + 1) { sum = sum + xs[i]; }
+          return sum;
+        }
+        fn reverse(xs: number[]): number[] {
+          let out: number[] = [];
+          for (let i: number = 0; i < len(xs); i = i + 1) { out = append(out, xs[len(xs) - 1 - i]); }
+          return out;
+        }
+        fn evens(limit: number): number[] {
+          let out: number[] = [];
+          for (let i: number = 0; i <= limit; i = i + 1) {
+            if (i % 2 == 0) { out = append(out, i); }
+          }
+          return out;
+        }
+        let xs: number[] = [3, 1, 4, 1, 5];
+        print(total(xs));
+        print(reverse(xs));
+        print(total(reverse(reverse(xs))));
+        print(evens(10));
+      `),
+      "14\n[5, 1, 4, 1, 3]\n14\n[0, 2, 4, 6, 8, 10]",
+    );
+  });
+
+  it("reports the type of an array as 'array'", () => {
+    assert.equal(printed("let xs: number[] = [1];\nprint(typeOf(xs));"), "array");
+  });
+
+  it("reports an out-of-range read at runtime", () => {
+    assert.throws(
+      () => run("let xs: number[] = [1, 2];\nprint(xs[2]);"),
+      /index 2 is out of range: this array has length 2/,
+    );
+    assert.throws(() => run("let xs: number[] = [1, 2];\nprint(xs[0 - 1]);"), /index -1 is out of range/);
+  });
+
+  it("reports an out-of-range write at runtime", () => {
+    // Bounds cannot be checked before the program runs, and Vela has no
+    // exceptions to catch, so the interpreter is where this is reported.
+    assert.throws(
+      () => run("let xs: number[] = [1, 2];\nxs[2] = 9;"),
+      /index 2 is out of range: this array has length 2/,
+    );
+    assert.throws(() => run("let xs: number[] = [];\nxs[0] = 1;"), /index 0 is out of range/);
+  });
+
+  it("locates the runtime error", () => {
+    assert.throws(
+      () => run("let xs: number[] = [1];\n\nprint(xs[1]);"),
+      (error: unknown) => {
+        assert.ok(error instanceof RuntimeError);
+        assert.equal(error.location.line, 3);
+        return true;
+      },
+    );
+  });
+});
+
 describe("interpreter: runtime errors", () => {
   it("rejects division by zero", () => {
     assert.throws(() => runUnchecked("let a: number = 1;\nlet b: number = 0;\nprint(a / b);"), (error: unknown) => {
@@ -671,16 +1611,14 @@ describe("interpreter: realistic programs", () => {
 
   it("runs a word-count style program with string concatenation", () => {
     const text = `
-      fn repeat(s: string, n: number): string {
-        let out: string = "";
-        for (let i: number = 0; i < n; i = i + 1) {
-          out = out + s;
-        }
+      fn pad(s: string, width: number): string {
+        let out: string = s;
+        while (len(out) < width) { out = out + "."; }
         return out;
       }
-      print(repeat("ab", 3));
+      print(pad("ab", 6) + " " + repeat("ab", 3));
     `;
-    assert.equal(printed(text), "ababab");
+    assert.equal(printed(text), "ab.... ababab");
   });
 
   it("runs a primality check", () => {

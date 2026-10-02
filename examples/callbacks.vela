@@ -1,61 +1,87 @@
-// callbacks.vela — passing functions around, now that Vela has function values.
+// callbacks.vela — passing functions around, and naming their signatures.
 //
-// A function can be stored in a `function`-typed variable, passed as an
-// argument, and returned from a function. That is enough for the pattern every
-// language reaches for sooner or later: a function that takes another function.
+// A function can be stored in a variable, passed as an argument, and returned
+// from a function. That is enough for the pattern every language reaches for
+// sooner or later: a function that takes another function.
 //
-// The caveat is worth stating once. A variable declared `function` records *that*
-// a function is stored, not which signature. So a call through one cannot be
-// checked: no arity check, and the result has no known type, which is why the
-// helpers below take an `any` and convert it explicitly. A named type like
-// `(number) -> number` would check both, at the cost of a function being
-// storable under only one exact signature.
+// The interesting part is the two ways to say so. A variable declared `function`
+// records *that* a function is stored and nothing else, so a call through one is
+// unchecked: no arity check, and the result has no known type, which is why
+// `applyAny` below needs `tostring` to turn an `any` back into a string.
+//
+// A written signature — `fn(number) -> number` — records the parameters and the
+// return type, so a call through it is checked properly and its result is a real
+// `number` rather than `any`. That is what `apply` below uses. The trade is that
+// a function then fits one exact signature: there is no subtyping, so a
+// two-parameter function is not a `fn(number) -> number`. When one function has
+// to stand in for several shapes, the bare `function` type is the tool.
 
 fn double(x: number): number { return x * 2; }
 fn square(x: number): number { return x * x; }
 fn negate(x: number): number { return 0 - x; }
 
-// Call a function value and render the result. `op(x)` has type 'any' because
-// the signature was not recorded, so `tostring` is how that 'any' becomes a
-// value this function can return.
-fn applyToText(op: function, x: number): string {
+// The bare type. `op(x)` has type 'any' because the signature was not recorded,
+// so `tostring` is how that 'any' becomes a string this function can return.
+fn applyAny(op: function, x: number): string {
     return "f(" + tostring(x) + ") = " + tostring(op(x));
 }
 
-// A function value stored in a variable and reassigned. This is the thing
-// `function` buys: without it, only a direct call by name is possible.
-print("stored and reassigned:");
-let f: function = double;
-print(applyToText(f, 21));
+// The written type. The call is checked, and the result is a `number`, so there
+// is no `any` to convert and no way to get this wrong by accident.
+fn apply(op: fn(number) -> number, x: number): string {
+    let result: number = op(x);
+    return "f(" + tostring(x) + ") = " + tostring(result);
+}
+
+// A function value stored under a signature, then swapped for one that shares it.
+// This is the thing a signature buys over calling by name: the two are provably
+// interchangeable here, and the assignment is checked against `fn(number) ->
+// number` rather than trusted.
+print("stored under a signature, then swapped:");
+let f: fn(number) -> number = double;
+print(apply(f, 21));
 f = square;
-print(applyToText(f, 5));
+print(apply(f, 5));
 f = negate;
-print(applyToText(f, 5));
+print(apply(f, 5));
 
 print("through a parameter:");
-print(applyToText(double, 10));
-print(applyToText(square, 4));
+print(apply(double, 10));
+print(apply(square, 4));
+
+print("through the bare type, where the call is unchecked:");
+print(applyAny(double, 10));
 
 // Returning a function from a function. Which one is chosen is decided by the
-// condition, not by anything captured — Vela cannot build a closure that reads a
-// local, because a function value names a signature and nothing more.
-fn pick(flag: bool): function {
+// condition. The bare return type is what lets one function return either shape;
+// had it been written `fn(number) -> number`, `pick` would still work, because
+// both branches have that signature — which is the case to notice.
+fn pick(flag: bool): fn(number) -> number {
     if (flag) { return square; }
     return double;
 }
 
 print("returned as a value:");
-let picked: function = pick(true);
-print(applyToText(picked, 6));
+let picked: fn(number) -> number = pick(true);
+print(apply(picked, 6));
 picked = pick(false);
-print(applyToText(picked, 6));
+print(apply(picked, 6));
 
 // Choose one of two functions on a condition, then apply the choice. Branching on
-// a bool is how you vary behaviour when there is no dispatch table.
-fn applyEither(flag: bool, whenTrue: function, whenFalse: function, x: number): string {
-    let chosen: function = whenFalse;
+// a bool is how you vary behaviour when there is no dispatch table. Both
+// parameters are named, so passing a function of the wrong signature is a compile
+// error rather than a surprise at the call inside.
+fn applyEither(flag: bool, whenTrue: fn(number) -> number, whenFalse: fn(number) -> number, x: number): string {
+    let chosen: fn(number) -> number = whenFalse;
     if (flag) { chosen = whenTrue; }
-    return applyToText(chosen, x);
+    return apply(chosen, x);
+}
+
+// A function that takes a function and hands back another function that still
+// takes one. The parameter type nests, so `twice` cannot be handed something that
+// is not callable at all.
+fn twice(f: fn(number) -> number, v: number): number {
+    return f(f(v));
 }
 
 // Two functions that call each other. A `let` must be declared before use, but a
@@ -75,6 +101,9 @@ fn isOdd(n: number): bool {
 print("chosen by a flag:");
 print(applyEither(true, double, square, 4));
 print(applyEither(false, double, square, 4));
+
+print("nested signature:");
+print(tostring(twice(double, 3)));
 
 print("mutual recursion:");
 print(tostring(isEven(10)) + " " + tostring(isOdd(10)) + " " + tostring(isEven(7)));

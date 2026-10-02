@@ -17,6 +17,7 @@ import type {
   Parameter,
   Program,
   Statement,
+  TypeNode,
 } from "./nodes.js";
 
 export interface PrintOptions {
@@ -79,8 +80,14 @@ class AstPrinter {
 
   printDeclaration(declaration: Declaration): void {
     switch (declaration.kind) {
-      case "letDecl": {
-        this.open(`(letDecl ${declaration.name}: ${declaration.type}${this.at(declaration.nameLocation)}`);
+      case "letDecl":
+      case "constDecl": {
+        // `let` and `const` are the same node apart from the keyword, so the printed
+        // form differs only in that word. Rendering both from one branch is what
+        // keeps the two from drifting apart in the output.
+        this.open(
+          `(${declaration.kind} ${declaration.name}: ${formatType(declaration.type)}${this.at(declaration.nameLocation)}`,
+        );
         this.printExpression(declaration.initializer);
         this.close(")");
         return;
@@ -89,9 +96,21 @@ class AstPrinter {
         this.open(
           `(fnDecl ${declaration.name} (${declaration.params
             .map(formatParam)
-            .join(", ")}) -> ${declaration.returnType}${this.at(declaration.nameLocation)}`,
+            .join(", ")}) -> ${formatType(declaration.returnType)}${this.at(declaration.nameLocation)}`,
         );
         this.printStatement(declaration.body);
+        this.close(")");
+        return;
+      }
+      case "structDecl": {
+        this.open(`(structDecl ${declaration.name}${this.at(declaration.nameLocation)}`);
+        for (const field of declaration.fields) {
+          // The `?` is written after the name, where the source writes it, so a
+          // reader comparing `vela ast` output against the file sees the same shape
+          // in both.
+          const optional = field.optional ? "?" : "";
+          this.leaf(`(field ${field.name}${optional}: ${formatType(field.type)})`, field.location);
+        }
         this.close(")");
         return;
       }
@@ -179,9 +198,9 @@ class AstPrinter {
       this.leaf("(empty)");
       return;
     }
-    // A `letDecl` in a header is still a Declaration, so print it the same way
-    // as any other rather than inventing a header-specific form.
-    if (initializer.kind === "letDecl") {
+    // A `letDecl` or `constDecl` in a header is still a Declaration, so print it the
+    // same way as any other rather than inventing a header-specific form.
+    if (initializer.kind === "letDecl" || initializer.kind === "constDecl") {
       this.printDeclaration(initializer);
       return;
     }
@@ -200,6 +219,9 @@ class AstPrinter {
         this.leaf(`(stringLiteral ${JSON.stringify(expression.value)})`, expression.location);
         return;
 
+      case "nullLiteral":
+        this.leaf(`(nullLiteral)`, expression.location);
+        return;
       case "booleanLiteral":
         this.leaf(`(booleanLiteral ${expression.value})`, expression.location);
         return;
@@ -249,10 +271,74 @@ class AstPrinter {
         this.close(")");
         return;
       }
+
+      case "indexAssign": {
+        this.open(`(indexAssign${this.at(expression.location)}`);
+        this.printExpression(expression.target);
+        this.printExpression(expression.index);
+        this.printExpression(expression.value);
+        this.close(")");
+        return;
+      }
+
+      // The field name is a leaf rather than a tail on the closing paren: it is
+      // part of the node, not of the bracket, and it is the one thing in the dump
+      // that says which field was meant.
+      case "fieldAccess": {
+        this.open(`(fieldAccess${this.at(expression.location)}`);
+        this.printExpression(expression.target);
+        this.leaf(expression.field, expression.location);
+        this.close(")");
+        return;
+      }
+
+      case "fieldAssign": {
+        this.open(`(fieldAssign${this.at(expression.location)}`);
+        this.printExpression(expression.target);
+        this.leaf(expression.field, expression.location);
+        this.printExpression(expression.value);
+        this.close(")");
+        return;
+      }
+
+      case "arrayLiteral": {
+        this.open(`(arrayLiteral${this.at(expression.location)}`);
+        for (const element of expression.elements) this.printExpression(element);
+        this.close(")");
+        return;
+      }
     }
   }
 }
 
 function formatParam(param: Parameter): string {
-  return `${param.name}: ${param.type}`;
+  return `${param.name}: ${formatType(param.type)}`;
+}
+
+/**
+ * How a type annotation is written back out.
+ *
+ * The printer renders the tree the way the source spelled it, so a `TypeNode`
+ * prints as its own text and not as the resolved `Type` the checker produces.
+ * Those are different representations of the same fact and only the first belongs
+ * in a tree. Every `TypeNode` kind is deliberately spelled exactly as it is written,
+ * so for a type with no structure `kind` is the whole answer; a kind that gains
+ * structure (a signature's parameters, an array's element type) needs a real
+ * rendering here.
+ */
+function formatType(type: TypeNode): string {
+  if (type.kind === "signature") {
+    const params = type.params.map(formatType).join(", ");
+    return `fn(${params}) -> ${formatType(type.returnType)}`;
+  }
+  // No parentheses around the element: the brackets bind to it, which is how it
+  // was written and how it parses back, so `number[][]` round-trips as itself.
+  if (type.kind === "array") return `${formatType(type.element)}[]`;
+  // A `?` after the type it applies to, for the same reason there are no
+  // parentheses: `number?[]` is an array of nullable numbers and reads as itself.
+  if (type.kind === "nullable") return `${formatType(type.inner)}?`;
+  // A struct annotation is its name, so the dump shows the same word the source
+  // did rather than a shape nobody wrote.
+  if (type.kind === "structType") return type.name;
+  return type.kind;
 }

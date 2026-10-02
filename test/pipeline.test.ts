@@ -65,6 +65,70 @@ test("compile reports type errors at the check stage", () => {
   assert.match(result.diagnostics[0]!.message, /string/);
 });
 
+test("a nullable program runs through every stage", () => {
+  // The end-to-end path for the feature: a nullable annotation, a null literal, a
+  // narrowing test and a nullable struct field, all in one program.
+  const result = compile("n.vela", [
+    "struct Node { value: number; next: Node?; }",
+    "let a: Node = Node(1, null);",
+    "let b: Node = Node(2, a);",
+    "if (b.next != null) { print(tostring(b.next.value)); }",
+    'print(tostring(a.next == null));',
+  ].join("\n"));
+  assert.equal(result.stage, "ok");
+  assert.deepEqual(result.diagnostics, []);
+});
+
+test("null in a non-nullable position is reported at the check stage", () => {
+  const result = compile("bad.vela", "let x: number = null;");
+  assert.equal(result.stage, "check");
+  assert.match(result.diagnostics[0]!.message, /'null'/);
+});
+
+test("a program with optional struct fields runs through every stage", () => {
+  // The end-to-end path for the feature: an optional field, a constructor that
+  // leaves it out, an explicit `null`, a narrowing test, and a value built from
+  // both, all in one program.
+  const result = compile("c.vela", [
+    "struct Config { retries: number; label?: string; }",
+    "let a: Config = Config(3);",
+    'let b: Config = Config(3, "prod");',
+    "let c: Config = Config(3, null);",
+    "if (b.label != null) { print(b.label); }",
+    'print(tostring(a == c));',
+  ].join("\n"));
+  assert.equal(result.stage, "ok");
+  assert.deepEqual(result.diagnostics, []);
+
+  const lines: string[] = [];
+  const restore = setOutput((line) => lines.push(line));
+  try {
+    new Interpreter(createGlobalEnvironment()).run(result.program!);
+  } finally {
+    restore();
+  }
+  // Leaving the argument out and passing null are the same state, so the two
+  // structs are equal.
+  assert.deepEqual(lines, ["prod", "true"]);
+});
+
+test("a wrong optional-field order is reported at the parse stage", () => {
+  // The rule is about how a call lines up with the fields, so it is caught where
+  // the declaration is read rather than waiting for a constructor call.
+  const result = compile("bad.vela", "struct D { label?: string; retries: number; }");
+  assert.equal(result.stage, "parse");
+  assert.match(result.diagnostics[0]!.message, /required field 'retries' cannot follow an optional one/);
+});
+
+test("a struct with optional fields survives a REPL entry", () => {
+  const out = captureStream();
+  const repl = new Repl({ output: out.stream });
+  repl.submit("struct Config { retries: number; label?: string; }");
+  repl.submit("Config(3);");
+  repl.submit('Config(3, "x").label;');
+  assert.match(out.text(), /Config\(retries: 3, label: null\)\nx\n/);
+});
+
 test("a type keyword in expression position is a parse error, not a silent literal", () => {
   // `number` and `string` name both a literal token kind and a type keyword. If
   // those two kinds collide, `parsePrefix` reads the keyword as a literal and
@@ -238,6 +302,33 @@ test("redeclaring the same name in a REPL entry is a static error", () => {
   repl.submit("s;");
   assert.match(out.text(), /already declared/);
   assert.match(out.text(), /first\n$/, "the original binding is unchanged");
+});
+
+test("Repl.submit keeps a struct between entries", () => {
+  const out = captureStream();
+  const repl = new Repl({ output: out.stream });
+  repl.submit("struct Point { x: number; y: number; }");
+  repl.submit("let p: Point = Point(3, 4);");
+  repl.submit("p.x + p.y;");
+  assert.equal(out.text(), "7\n");
+});
+
+test("a struct declared in a REPL entry can be used by a function in the next", () => {
+  const out = captureStream();
+  const repl = new Repl({ output: out.stream });
+  repl.submit("struct P { x: number; }");
+  repl.submit("fn get(p: P): number { return p.x; }");
+  repl.submit("get(P(9));");
+  assert.equal(out.text(), "9\n");
+});
+
+test("Repl.submit resets structs as well as bindings", () => {
+  const out = captureStream();
+  const repl = new Repl({ output: out.stream });
+  repl.submit("struct Point { x: number; }");
+  repl.reset();
+  repl.submit("let p: Point = Point(1);");
+  assert.match(out.text(), /cannot find a struct called 'Point'/);
 });
 
 test("Repl.submit resets the environment", () => {

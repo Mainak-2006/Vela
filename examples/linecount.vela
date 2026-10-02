@@ -4,8 +4,8 @@
 //   vela run examples/linecount.vela < notes.txt
 //
 // Everything is tracked in numbers as each line arrives, so no line is ever
-// stored. Vela has no collections, and that turns out to be the natural way to
-// write this: a summary only ever needs the running totals.
+// stored. That turns out to be the natural way to write this: a summary only ever
+// needs the running totals, and an array of them would be longer than the program.
 print("enter some lines, one per line; send an empty line to finish");
 
 let count: number = 0;

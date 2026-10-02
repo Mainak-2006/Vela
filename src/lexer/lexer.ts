@@ -176,6 +176,8 @@ class Lexer {
         return this.emit(TOKEN.LEFT_BRACKET);
       case "]":
         return this.emit(TOKEN.RIGHT_BRACKET);
+      case ".":
+        return this.emit(TOKEN.DOT);
       case ",":
         return this.emit(TOKEN.COMMA);
       case ";":
@@ -191,6 +193,7 @@ class Lexer {
       case "-":
         if (this.match("=")) return this.emit(TOKEN.MINUS_EQUAL);
         if (this.match("-")) return this.emit(TOKEN.MINUS_MINUS);
+        if (this.match(">")) return this.emit(TOKEN.ARROW);
         return this.emit(TOKEN.MINUS);
       case "*":
         if (this.match("=")) return this.emit(TOKEN.STAR_EQUAL);
@@ -201,6 +204,10 @@ class Lexer {
       case "%":
         if (this.match("=")) return this.emit(TOKEN.PERCENT_EQUAL);
         return this.emit(TOKEN.PERCENT);
+      case "?":
+        return this.emit(TOKEN.QUESTION);
+      case "?":
+        return this.emit(TOKEN.QUESTION);
 
       // Peek for the second character before falling back to a one-character operator.
       case "=":

@@ -19,7 +19,9 @@ export const TOKEN = {
 
   // Keywords
   LET: "let",
+  CONST: "const",
   FN: "fn",
+  STRUCT: "struct",
   RETURN: "return",
   IF: "if",
   ELSE: "else",
@@ -40,6 +42,7 @@ export const TOKEN = {
   // Boolean literals
   TRUE: "true",
   FALSE: "false",
+  NULL: "null",
 
   // Operators
   PLUS: "+",
@@ -57,6 +60,14 @@ export const TOKEN = {
   GREATER_EQUAL: ">=",
   AND_AND: "&&",
   OR_OR: "||",
+  /**
+   * The return-type arrow of a written signature, as in
+   * `fn(number) -> string`. Only legal inside a type, but it is scanned
+   * unconditionally: the lexer has no grammar to consult, and `-` followed by `>`
+   * cannot be two valid tokens anywhere in a declaration, so there is nothing to
+   * disambiguate against.
+   */
+  ARROW: "->",
 
   // Compound assignment. These are sugar: each one means `x = x <op> y`, and
   // the parser desugars them rather than the checker or interpreter knowing
@@ -66,6 +77,7 @@ export const TOKEN = {
   STAR_EQUAL: "*=",
   SLASH_EQUAL: "/=",
   PERCENT_EQUAL: "%=",
+  QUESTION: "?",
 
   // Standalone increment and decrement. These are statements, not expressions:
   // there is no post-increment value, so `let y: number = i++;` is a parse error.
@@ -75,6 +87,15 @@ export const TOKEN = {
   // Punctuation
   LEFT_PAREN: "(",
   RIGHT_PAREN: ")",
+  /**
+   * The field accessor, as in `p.x`.
+   *
+   * Its own token rather than a suffix of an identifier, because a decimal point
+   * is lexed as part of the number and `1.5` must stay one token. The number scan
+   * runs first and swallows the `.`, so the only way a `.` reaches here is a
+   * field access — `1.5.x` is a `.` after a number, and the checker reports it.
+   */
+  DOT: ".",
   LEFT_BRACE: "{",
   RIGHT_BRACE: "}",
   COMMA: ",",
@@ -91,7 +112,9 @@ export type TokenKind = (typeof TOKEN)[keyof typeof TOKEN];
 
 const KEYWORDS: ReadonlyMap<string, TokenKind> = new Map([
   ["let", TOKEN.LET],
+  ["const", TOKEN.CONST],
   ["fn", TOKEN.FN],
+  ["struct", TOKEN.STRUCT],
   ["return", TOKEN.RETURN],
   ["if", TOKEN.IF],
   ["else", TOKEN.ELSE],
@@ -107,6 +130,7 @@ const KEYWORDS: ReadonlyMap<string, TokenKind> = new Map([
   ["function", TOKEN.TYPE_FUNCTION],
   ["true", TOKEN.TRUE],
   ["false", TOKEN.FALSE],
+  ["null", TOKEN.NULL],
 ]);
 
 /** Look up a keyword by its spelling. Returns undefined for ordinary identifiers. */
@@ -148,6 +172,8 @@ export function describeKind(kind: TokenKind): string {
       return "'('";
     case TOKEN.RIGHT_PAREN:
       return "')'";
+    case TOKEN.DOT:
+      return "'.'";
     case TOKEN.LEFT_BRACE:
       return "'{'";
     case TOKEN.RIGHT_BRACE:

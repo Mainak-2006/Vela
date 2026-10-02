@@ -133,6 +133,32 @@ describe("lexer: operators and maximal munch", () => {
     assert.deepEqual(kinds("a >> b"), [TOKEN.IDENT, TOKEN.GREATER, TOKEN.GREATER, TOKEN.IDENT]);
   });
 
+  it("lexes `->` as one arrow token", () => {
+    // `->` only appears inside a type, but the lexer has no grammar to consult.
+    // Scanning it as one token is safe because `-` then `>` cannot both be valid
+    // anywhere a declaration could put them, so there is nothing to disambiguate.
+    assert.deepEqual(kinds("->"), [TOKEN.ARROW]);
+    assert.deepEqual(kinds("fn(number) -> number"), [
+      TOKEN.FN,
+      TOKEN.LEFT_PAREN,
+      TOKEN.TYPE_NUMBER,
+      TOKEN.RIGHT_PAREN,
+      TOKEN.ARROW,
+      TOKEN.TYPE_NUMBER,
+    ]);
+  });
+
+  it("still splits the operators that start with `-`", () => {
+    // Maximal munch has to be checked against the new arrow, or `-=` and `--`
+    // would start being scanned as a minus followed by something.
+    assert.deepEqual(kinds("-= -- - >"), [
+      TOKEN.MINUS_EQUAL,
+      TOKEN.MINUS_MINUS,
+      TOKEN.MINUS,
+      TOKEN.GREATER,
+    ]);
+  });
+
   it("does not split `=>`", () => {
     assert.deepEqual(kinds("=>"), [TOKEN.EQUAL, TOKEN.GREATER]);
   });
@@ -151,6 +177,23 @@ describe("lexer: operators and maximal munch", () => {
   });
 });
 
+describe("lexer: structs", () => {
+  it("lexes `struct` as a keyword rather than a name", () => {
+    assert.deepEqual(kinds("struct"), [TOKEN.STRUCT]);
+    assert.deepEqual(lexemes("struct"), ["struct"]);
+  });
+
+  it("lexes the dot that introduces a field", () => {
+    assert.deepEqual(kinds("p.x"), [TOKEN.IDENT, TOKEN.DOT, TOKEN.IDENT]);
+    assert.deepEqual(kinds("a.b.c"), [TOKEN.IDENT, TOKEN.DOT, TOKEN.IDENT, TOKEN.DOT, TOKEN.IDENT]);
+  });
+
+  it("does not mistake a decimal point for a dot", () => {
+    assert.deepEqual(kinds("1.5"), [TOKEN.NUMBER]);
+    assert.equal(lex("1.5").tokens[0]?.numericValue, 1.5);
+  });
+});
+
 describe("lexer: identifiers and keywords", () => {
   it("lexes identifiers with letters, digits, and underscores", () => {
     assert.deepEqual(lexemes("_a1 B2_c d"), ["_a1", "B2_c", "d"]);
@@ -166,10 +209,12 @@ describe("lexer: identifiers and keywords", () => {
   });
 
   it("recognises every keyword", () => {
-    const kindsOfKeywords = kinds("let fn return if else while for break continue print number string bool void true false");
+    const kindsOfKeywords = kinds("let const fn struct return if else while for break continue print number string bool void true false null");
     assert.deepEqual(kindsOfKeywords, [
       TOKEN.LET,
+      TOKEN.CONST,
       TOKEN.FN,
+      TOKEN.STRUCT,
       TOKEN.RETURN,
       TOKEN.IF,
       TOKEN.ELSE,
@@ -184,6 +229,27 @@ describe("lexer: identifiers and keywords", () => {
       TOKEN.TYPE_VOID,
       TOKEN.TRUE,
       TOKEN.FALSE,
+      TOKEN.NULL,
+    ]);
+  });
+
+  it("lexes 'null' as one kind, not as a name", () => {
+    // `null` is a literal, so it has to be lexed as one. It is *not* a type keyword
+    // the way `number` is: there is no way to write `null` where a type is expected,
+    // because a nullable type is written `T?` and the absence it stands for is a
+    // value, not a type you can name and pass around.
+    assert.deepEqual(kinds("null"), [TOKEN.NULL]);
+    assert.notEqual(TOKEN.NULL, TOKEN.TYPE_NUMBER);
+    assert.deepEqual(kinds("nullable nullValue"), [TOKEN.IDENT, TOKEN.IDENT]);
+  });
+
+  it("does not treat `const` as an identifier, nor `constant` as a keyword", () => {
+    // The keyword is spelled exactly `const`, and a name that merely starts with it
+    // is still a name, so a program can have a variable called `constLength`.
+    assert.deepEqual(kinds("const constLength constant"), [
+      TOKEN.CONST,
+      TOKEN.IDENT,
+      TOKEN.IDENT,
     ]);
   });
 

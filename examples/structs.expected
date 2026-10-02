@@ -1,0 +1,19 @@
+point:      Point(x: 3, y: 4)
+fields:     3,4
+written:    Point(x: 9, y: 5)
+copy:       9 vs 100
+box:        Box(label: origin, at: Point(x: 9, y: 5), tags: [a, b])
+copy:       Box(label: origin, at: Point(x: 9, y: 0), tags: [z, b])
+shared:     [z, shared]
+equal:      false
+same?       true
+moved:      Point(x: 0, y: 5)
+unchanged:  Point(x: 9, y: 5)
+marker:     Marker()
+types:      Point Box Marker
+points:     [Point(x: 42, y: 0), Point(x: 1, y: 1)]
+omitted:    Config(retries: 3, label: null, note: null)
+given:      Config(retries: 3, label: prod, note: written)
+equal:      true
+label:      (none) / prod
+written:    Config(retries: 1, label: later, note: null)

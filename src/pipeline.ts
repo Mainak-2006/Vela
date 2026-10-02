@@ -16,7 +16,7 @@
 import { readFileSync } from "node:fs";
 
 import { printProgram, type PrintOptions } from "./ast/astPrinter.js";
-import type { Program } from "./ast/nodes.js";
+import type { Program, StructDeclaration } from "./ast/nodes.js";
 import { DiagnosticBag, SourceFile, type Diagnostic } from "./diagnostics.js";
 import { formatToken, tokenize } from "./lexer/lexer.js";
 import type { Token } from "./lexer/token.js";
@@ -39,6 +39,12 @@ export interface CompileResult {
 export interface CompileOptions {
   /** Names already in scope, for REPL entries. */
   readonly known?: readonly Symbol[];
+  /**
+   * Structs declared by earlier REPL entries. A struct is a type rather than a
+   * value, so it is not among `known` — but an entry that says `let p: Point = ...`
+   * still has to resolve `Point`, so the declarations travel alongside the names.
+   */
+  readonly knownStructs?: readonly StructDeclaration[];
   /** Stop after the lexer, for `vela tokens`. */
   readonly lexOnly?: boolean;
   /** Stop after the parser, for `vela ast`. */
@@ -66,7 +72,7 @@ export function compile(path: string, text: string, options: CompileOptions = {}
     };
   }
 
-  check(program, bag, options.known ?? []);
+  check(program, bag, options.known ?? [], options.knownStructs ?? []);
   const stage: Stage = bag.hasErrors() ? "check" : "ok";
   return { source, stage, tokens, program, diagnostics: bag.all() };
 }

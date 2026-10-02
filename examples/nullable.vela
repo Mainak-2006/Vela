@@ -1,0 +1,81 @@
+// nullable.vela — `T?` says a value may be absent, and `null` is what absence is.
+// There is no `undefined` and no `Option`: the type records the possibility, and a
+// test against `null` is what settles it.
+
+let nothing: number? = null;
+let something: number? = 5;
+let word: string? = "hi";
+
+// `T?` accepts a `T` and `null`, so a value widens into it. The reverse is refused:
+// a `number?` might be absent, and a `number` has to be there.
+
+fn describe(n: number?): string {
+    // A test narrows the rest of the branch, so `n` is a `number` from here to the
+    // end of the block, and the compiler uses that instead of asking again.
+    if (n == null) {
+        return "absent";
+    }
+    return "present: " + tostring(n + 1);
+}
+
+print(describe(nothing));
+print(describe(something));
+
+// The other direction of the same test: `!= null` is how a value is taken out of a
+// nullable, and the `else` arm needs no test at all because the two arms are separate.
+
+fn firstLetter(s: string?): string {
+    if (s != null) {
+        return s[0];
+    }
+    return "-";
+}
+
+print(firstLetter(word));
+print(firstLetter(null));
+
+// A struct field may be nullable, which is how a shape refers to itself: `next` is
+// either another Node or absent, and a chain ends by holding null rather than by
+// being infinite. Nothing else breaks such a loop — a plain `next: Node` would need a
+// Node that does not exist yet, and is rejected.
+
+struct Node {
+    value: number;
+    next: Node?;
+}
+
+fn sum(head: Node?): number {
+    let total: number = 0;
+    // A field chain narrows too, one step at a time: the first test is what makes the
+    // second one readable, and `head.value` is a `number` rather than an error.
+    let at: Node? = head;
+    while (at != null) {
+        total = total + at.value;
+        at = at.next;
+    }
+    return total;
+}
+
+let a: Node = Node(1, null);
+let b: Node = Node(2, a);
+let c: Node = Node(3, Node(4, null));
+print("chain: " + tostring(sum(c)));
+
+// An array of nullable elements and a nullable array are two different types, and
+// both exist: `number?[]` may hold an absent element, `number[]?` may be absent.
+
+let maybeElements: number?[] = [1, null, 3];
+print("elements: " + tostring(len(maybeElements)));
+print("first:    " + tostring(maybeElements[0] == null));
+
+let maybeArray: number[]? = null;
+if (maybeArray != null) {
+    print("len: " + tostring(len(maybeArray)));
+} else {
+    print("no array at all");
+}
+
+// `null` is a value of its own type, which is why it can only be stored where a
+// nullable type is expected — and why `typeOf` names it "null".
+print("type:    " + typeOf(nothing));
+print("string?: " + typeOf(word));

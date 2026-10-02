@@ -1,0 +1,42 @@
+// constants.vela — `const` binds and types exactly like `let`, and the only
+// difference is that the name can never be assigned to again. Try adding
+// `LIMIT = 99;` and the checker will say so.
+
+const TITLE: string = "triangle numbers";
+const WIDTH: number = 3;
+const LIMIT: number = 10;
+
+fn row(width: number): string {
+    let out: string = "";
+    for (let i: number = 0; i < width; i = i + 1) {
+        out = out + "*";
+    }
+    return out;
+}
+
+// `const` is accepted in a `for` header, for a loop whose count is driven by
+// something other than its own counter. `i++` in the update would be an
+// assignment to a `const`, so the fixed name is the one being read here.
+fn banner(rows: number): void {
+    let n: number = 0;
+    for (const tag: string = "row"; n < rows; ) {
+        print(tag + " " + tostring(n + 1) + ": " + row(n + 1));
+        n = n + 1;
+    }
+}
+
+fn triangle(width: number, limit: number): void {
+    for (let n: number = 1; n <= limit; n = n + 1) {
+        print(row(width) + "  " + tostring(n));
+    }
+}
+
+fn main(): void {
+    print(TITLE);
+    print(row(WIDTH));
+    triangle(WIDTH, LIMIT);
+    print("");
+    banner(3);
+}
+
+main();

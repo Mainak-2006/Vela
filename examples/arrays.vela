@@ -1,0 +1,103 @@
+// arrays.vela — an array is a fixed number of elements of one type, written
+// `T[]`. Its length never changes, so a write past the end is a runtime error
+// rather than a silent grow. Everything below is a loop over indexes, because
+// there is no `for ... of` and no collection library.
+
+fn total(xs: number[]): number {
+    let sum: number = 0;
+    for (let i: number = 0; i < len(xs); i = i + 1) { sum = sum + xs[i]; }
+    return sum;
+}
+
+fn largest(xs: number[]): number {
+    // The caller has already promised there is at least one element, so a
+    // sentinel is only needed to start from: the first element replaces it.
+    let best: number = xs[0];
+    for (let i: number = 1; i < len(xs); i = i + 1) {
+        if (xs[i] > best) { best = xs[i]; }
+    }
+    return best;
+}
+
+// Sorting in place: no copy, and the return value is the same array, so the
+// caller keeps the reference it already had.
+fn sort(xs: number[]): number[] {
+    for (let i: number = 0; i < len(xs) - 1; i = i + 1) {
+        for (let j: number = 0; j < len(xs) - 1 - i; j = j + 1) {
+            if (xs[j] > xs[j + 1]) {
+                let swap: number = xs[j];
+                xs[j] = xs[j + 1];
+                xs[j + 1] = swap;
+            }
+        }
+    }
+    return xs;
+}
+
+// The one way to build an array whose length is only known while running:
+// `append` returns a *new* array, so `xs` itself never changes. Note the
+// reassignment — without it the loop would go nowhere.
+fn squares(limit: number): number[] {
+    let out: number[] = [];
+    for (let n: number = 1; n <= limit; n = n + 1) { out = append(out, n * n); }
+    return out;
+}
+
+fn evens(xs: number[]): number[] {
+    let out: number[] = [];
+    for (let i: number = 0; i < len(xs); i = i + 1) {
+        if (xs[i] % 2 == 0) { out = append(out, xs[i]); }
+    }
+    return out;
+}
+
+// An array of arrays needs no parentheses: `number[][]` binds the brackets to the
+// element type, so the inner arrays are checked as `number[]` themselves.
+fn grid(): number[][] {
+    return [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+}
+
+fn main(): void {
+    let xs: number[] = [5, 3, 8, 1];
+    print("literal:    " + tostring(xs));
+    print("length:     " + tostring(len(xs)));
+    print("total:      " + tostring(total(xs)));
+    print("largest:     " + tostring(largest(xs)));
+
+    // Reading and writing one element at a time. `xs[i] += 1` is sugar for
+    // `xs[i] = xs[i] + 1`, exactly as `n += 1` is sugar for `n = n + 1`.
+    xs[0] = 100;
+    xs[1] += 7;
+    print("after:      " + tostring(xs));
+
+    // An array is a value with identity, so two names can mean the same one.
+    let alias: number[] = xs;
+    alias[3] = 42;
+    print("aliased:    " + tostring(xs));
+    print("same?       " + tostring(xs == alias));
+    // `==` compares the reference, not the contents, so two separately built
+    // arrays holding equal elements are still two arrays.
+    print("equal?      " + tostring(xs == [100, 10, 8, 42]));
+
+    print("sorted:     " + tostring(sort(xs)));
+    print("squares:    " + tostring(squares(5)));
+    print("evens:      " + tostring(evens(xs)));
+
+    let board: number[][] = grid();
+    print("grid:       " + tostring(board));
+    print("row 1:      " + tostring(board[1]));
+    print("cell:       " + tostring(board[1][1]));
+    // Writing through two indexes reaches into the inner array.
+    board[1][1] = 0;
+    print("changed:    " + tostring(board));
+
+    // An empty literal needs a type somewhere: `let xs: number[] = [];` gets it
+    // from the declaration, while `let xs = [];` could not be checked at all.
+    let empty: number[] = [];
+    print("empty:      " + tostring(empty) + " of length " + tostring(len(empty)));
+    print("first:      " + tostring(append(empty, 1)));
+
+    print("types:      " + typeOf(xs) + " " + typeOf(xs[0]) + " " + typeOf("s"));
+}
+
+main();

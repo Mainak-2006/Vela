@@ -59,7 +59,7 @@ export {
   functionType,
   isError,
   numberType,
-  primitiveType,
+  resolveTypeNode,
   stringType,
   voidType,
   typesEqual,

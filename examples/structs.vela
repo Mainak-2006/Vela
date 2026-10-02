@@ -1,0 +1,110 @@
+// structs.vela — a struct is a named group of typed fields, declared at the top
+// level and built by calling its name. There are no methods, no inheritance and
+// no defaults: `Point(1, 2)` gives every field a value, in the order declared.
+
+struct Point {
+    x: number;
+    y: number;
+}
+
+// A struct may hold another struct, and an array of them. Fields are ordinary
+// types, so a recursive shape like this needs no special syntax.
+struct Box {
+    label: string;
+    at: Point;
+    tags: string[];
+}
+
+// A `?` after a field's *name* makes the field optional: the constructor may leave
+// it out, and the field's type becomes `T?`. They have to be a suffix, because the
+// arguments are positional — `Config(3)` fills `retries`, and `Config(3, "x")` also
+// fills `label`, so there is no gap for an omitted field to sit in.
+struct Config {
+    retries: number;
+    label?: string;
+    note?: string;
+}
+
+// An empty struct is a value with nothing in it — a marker, which is what makes
+// "does this have a name" a question a struct can answer.
+struct Marker {}
+
+fn move(p: Point, dx: number, dy: number): Point {
+    return Point(p.x + dx, p.y + dy);
+}
+
+// A field that is optional is a nullable one, so a test against `null` narrows it
+// exactly as it would for a variable.
+fn labelOf(c: Config): string {
+    if (c.label != null) { return c.label; }
+    return "(none)";
+}
+
+fn main(): void {
+    let p: Point = Point(3, 4);
+    print("point:      " + tostring(p));
+    print("fields:     " + tostring(p.x) + "," + tostring(p.y));
+
+    // A field is a place, so it can be written, and `+=` is sugar for
+    // `p.x = p.x + 1` just as it is for a variable.
+    p.x = 9;
+    p.y += 1;
+    print("written:    " + tostring(p));
+
+    // A struct is a *value*, not a reference: storing one copies it, all the way
+    // down, including an array it holds. So a second name is a second struct and
+    // writing through it leaves the first alone.
+    let q: Point = p;
+    q.x = 100;
+    print("copy:       " + tostring(p.x) + " vs " + tostring(q.x));
+
+    let b: Box = Box("origin", p, ["a", "b"]);
+    let b2: Box = b;
+    b2.at.y = 0;
+    b2.tags[0] = "z";
+    print("box:        " + tostring(b));
+    print("copy:       " + tostring(b2));
+
+    // Which is why an array bound on its own is still shared: the array is the
+    // reference, and a struct only copies what it contains.
+    let shared: string[] = b2.tags;
+    shared[1] = "shared";
+    print("shared:     " + tostring(b2.tags));
+
+    // `==` on two structs compares their fields, so a copy equals what it was
+    // copied from. An array inside a struct is still compared by reference.
+    print("equal:      " + tostring(p == q));
+    print("same?       " + tostring(Point(1, 2) == Point(1, 2)));
+
+    print("moved:      " + tostring(move(p, -9, 0)));
+    print("unchanged:  " + tostring(p));
+
+    // A struct is a type, not a value, so its name is not something a program can
+    // hold — but `typeOf` on a built one gives the declared name back.
+    let m: Marker = Marker();
+    print("marker:     " + tostring(m));
+    print("types:      " + typeOf(p) + " " + typeOf(b) + " " + typeOf(m));
+
+    let ps: Point[] = [Point(0, 0), Point(1, 1)];
+    ps[0].x = 42;
+    print("points:     " + tostring(ps));
+
+    // An omitted field is stored as `null`, so leaving the argument out and passing
+    // `null` are the same struct — the field holds a value or it is `null`, and the
+    // two spellings of absence are the same absence.
+    let c1: Config = Config(3);
+    let c2: Config = Config(3, "prod", "written");
+    let c3: Config = Config(3, null, null);
+    print("omitted:    " + tostring(c1));
+    print("given:      " + tostring(c2));
+    print("equal:      " + tostring(c1 == c3));
+    print("label:      " + labelOf(c1) + " / " + labelOf(c2));
+
+    // The field is a place like any other, so it can be written later — which is
+    // the other half of "optional": a default is not needed to fill it in.
+    let c4: Config = Config(1);
+    c4.label = "later";
+    print("written:    " + tostring(c4));
+}
+
+main();

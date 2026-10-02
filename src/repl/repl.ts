@@ -18,12 +18,12 @@
 
 import { createInterface, type Interface } from "node:readline/promises";
 
-import type { Declaration } from "../ast/nodes.js";
+import type { Declaration, StructDeclaration } from "../ast/nodes.js";
 import { DiagnosticBag, SourceFile, renderDiagnostic, type Diagnostic } from "../diagnostics.js";
 import { TOKEN } from "../lexer/token.js";
 import { tokenize } from "../lexer/lexer.js";
 import type { Symbol } from "../types/checker.js";
-import { functionType, primitiveType } from "../types/types.js";
+import { functionType, resolveTypeNode } from "../types/types.js";
 import { Interpreter, RuntimeError, createGlobalEnvironment } from "../runtime/interpreter.js";
 import { displayValue, setInput, setOutput, type Value } from "../runtime/values.js";
 import { compile } from "../pipeline.js";
@@ -49,19 +49,22 @@ export interface ReplOptions {
 function symbolsOf(declarations: readonly Declaration[]): Symbol[] {
   const symbols: Symbol[] = [];
   for (const declaration of declarations) {
-    if (declaration.kind === "letDecl") {
+    if (declaration.kind === "letDecl" || declaration.kind === "constDecl") {
+      // A `const` carries its own kind into the known-scope, so an entry that
+      // assigns to a `const` defined in an earlier line is rejected the same way it
+      // would be in a single file.
       symbols.push({
         name: declaration.name,
-        type: primitiveType(declaration.type),
-        kind: "variable",
+        type: resolveTypeNode(declaration.type),
+        kind: declaration.kind === "constDecl" ? "constant" : "variable",
         location: declaration.nameLocation,
       });
     } else if (declaration.kind === "fnDecl") {
       symbols.push({
         name: declaration.name,
         type: functionType(
-          declaration.params.map((p) => primitiveType(p.type)),
-          primitiveType(declaration.returnType),
+          declaration.params.map((p) => resolveTypeNode(p.type)),
+          resolveTypeNode(declaration.returnType),
         ),
         kind: "function",
         location: declaration.nameLocation,
@@ -122,6 +125,12 @@ export class Repl {
   private readonly globals = createGlobalEnvironment();
   private readonly interpreter = new Interpreter(this.globals);
   private readonly known: Symbol[] = [];
+  /**
+   * Structs declared so far, so `struct Point {...}` in one entry is usable in the
+   * next. Both halves are needed: the checker needs the declaration to resolve the
+   * name as a type, and the interpreter needs it to build a value from a call.
+   */
+  private readonly knownStructs: StructDeclaration[] = [];
   private buffer = "";
   private restoreOutput: (() => void) | null = null;
   private restoreInput: (() => void) | null = null;
@@ -204,7 +213,10 @@ export class Repl {
 
   /** Compile and run one complete entry. Exposed so tests can drive it directly. */
   submit(text: string): { output: string; value?: Value } {
-    const result = compile("<repl>", text, { known: this.known });
+    const result = compile("<repl>", text, {
+      known: this.known,
+      knownStructs: this.knownStructs,
+    });
     if (result.stage !== "ok" || !result.program) {
       this.reportDiagnostics(result.source.text, result.diagnostics);
       return { output: "" };
@@ -213,6 +225,14 @@ export class Repl {
     try {
       const value = this.interpreter.run(result.program);
       for (const declaration of result.program.declarations) {
+        // A struct is not a name binding, so it goes to its own list rather than
+        // through `symbolsOf` — and registering it is what makes a later
+        // `Point(1, 2)` in another entry build a value.
+        if (declaration.kind === "structDecl") {
+          this.knownStructs.push(declaration);
+          this.interpreter.registerStructType(declaration);
+          continue;
+        }
         this.known.push(...symbolsOf([declaration]));
       }
       if (value.kind !== "void") {
@@ -241,6 +261,7 @@ export class Repl {
   reset(): void {
     this.globals.clear();
     this.known.length = 0;
+    this.knownStructs.length = 0;
     this.buffer = "";
   }
 

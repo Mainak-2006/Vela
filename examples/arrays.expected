@@ -1,0 +1,18 @@
+literal:    [5, 3, 8, 1]
+length:     4
+total:      17
+largest:     8
+after:      [100, 10, 8, 1]
+aliased:    [100, 10, 8, 42]
+same?       true
+equal?      false
+sorted:     [8, 10, 42, 100]
+squares:    [1, 4, 9, 16, 25]
+evens:      [8, 10, 42, 100]
+grid:       [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+row 1:      [4, 5, 6]
+cell:       5
+changed:    [[1, 2, 3], [4, 0, 6], [7, 8, 9]]
+empty:      [] of length 0
+first:      [1]
+types:      array number string

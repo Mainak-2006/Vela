@@ -7,6 +7,12 @@ compare:  true false
 same:     true false
 anagram:  true false
 prefix:   true false
+suffix:   true false
+find:     2 -1
+slice:    ell lo 
+case:     HELLO mixed
+trim:     [padded]
+replace:  a+b-c a-b-c
 count:    3 0
 index:    ho e
 indexed:  1

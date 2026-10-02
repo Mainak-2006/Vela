@@ -9,20 +9,26 @@
  */
 
 import type {
+  ArrayLiteral,
   AssignmentExpression,
   BinaryExpression,
   Block,
   Declaration,
   BooleanLiteral,
+  NullLiteral,
   BreakStatement,
   CallExpression,
   IndexExpression,
+  ConstDeclaration,
   ContinueStatement,
   Expression,
   ExpressionStatement,
+  FieldAccessExpression,
+  FieldAssignmentExpression,
   ForStatement,
   FunctionDeclaration,
   IfStatement,
+  IndexAssignmentExpression,
   LetDeclaration,
   LogicalExpression,
   NumberLiteral,
@@ -31,6 +37,7 @@ import type {
   ReturnStatement,
   Statement,
   StringLiteral,
+  StructDeclaration,
   UnaryExpression,
   Variable,
   WhileStatement,
@@ -40,7 +47,9 @@ import type {
 export interface NodeVisitor<T> {
   program(node: Program): T;
   letDecl(node: LetDeclaration): T;
+  constDecl(node: ConstDeclaration): T;
   fnDecl(node: FunctionDeclaration): T;
+  structDecl(node: StructDeclaration): T;
   block(node: Block): T;
   ifStmt(node: IfStatement): T;
   whileStmt(node: WhileStatement): T;
@@ -53,6 +62,7 @@ export interface NodeVisitor<T> {
   numberLiteral(node: NumberLiteral): T;
   stringLiteral(node: StringLiteral): T;
   booleanLiteral(node: BooleanLiteral): T;
+  nullLiteral(node: NullLiteral): T;
   variable(node: Variable): T;
   unary(node: UnaryExpression): T;
   binary(node: BinaryExpression): T;
@@ -60,6 +70,10 @@ export interface NodeVisitor<T> {
   assignment(node: AssignmentExpression): T;
   call(node: CallExpression): T;
   index(node: IndexExpression): T;
+  indexAssign(node: IndexAssignmentExpression): T;
+  fieldAccess(node: FieldAccessExpression): T;
+  fieldAssign(node: FieldAssignmentExpression): T;
+  arrayLiteral(node: ArrayLiteral): T;
 }
 
 export function visit<T>(node: Program, visitor: NodeVisitor<T>): T;
@@ -82,8 +96,12 @@ export function visit<T>(
       return visitor.program(node);
     case "letDecl":
       return visitor.letDecl(node);
+    case "constDecl":
+      return visitor.constDecl(node);
     case "fnDecl":
       return visitor.fnDecl(node);
+    case "structDecl":
+      return visitor.structDecl(node);
     case "block":
       return visitor.block(node);
     case "if":
@@ -108,6 +126,8 @@ export function visit<T>(
       return visitor.stringLiteral(node);
     case "booleanLiteral":
       return visitor.booleanLiteral(node);
+    case "nullLiteral":
+      return visitor.nullLiteral(node);
     case "variable":
       return visitor.variable(node);
     case "unary":
@@ -122,6 +142,14 @@ export function visit<T>(
       return visitor.call(node);
     case "index":
       return visitor.index(node);
+    case "fieldAccess":
+      return visitor.fieldAccess(node);
+    case "fieldAssign":
+      return visitor.fieldAssign(node);
+    case "indexAssign":
+      return visitor.indexAssign(node);
+    case "arrayLiteral":
+      return visitor.arrayLiteral(node);
     default: {
       const exhaustive: never = node;
       return exhaustive;
