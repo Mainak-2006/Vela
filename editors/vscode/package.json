@@ -2,7 +2,7 @@
   "name": "vela-language",
   "displayName": "Vela by Mainak",
   "description": "Language support for Vela: syntax highlighting, bracket matching, and file icons for .vela files.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "mainakkundu",
   "license": "MIT",
   "author": {

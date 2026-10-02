@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Highlight the `const` keyword.
 - Highlight all twenty-three built-ins, which were not distinguished from ordinary

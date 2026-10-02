@@ -1,6 +1,6 @@
 {
   "name": "vela-lang",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Vela — a small statically-typed language and its compiler (lexer, parser, type checker, tree-walking interpreter).",
   "license": "MIT",
   "author": "Mainak Kundu <mainakkundu13@gmail.com>",
@@ -21,8 +21,8 @@
   ],
   "type": "module",
   "bin": {
-    "vela": "./dist/cli.js",
-    "vela-lang": "./dist/cli.js"
+    "vela": "dist/cli.js",
+    "vela-lang": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
