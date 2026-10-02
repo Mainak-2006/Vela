@@ -499,7 +499,25 @@ function apply(target: Target, source: Source, options: Options): Outcome {
     };
   }
   if (existing === source.version) {
-    return { target, status: "current", detail: target.path };
+    // The version alone is not enough to call a copy current: the stub can be edited
+    // without a release, and a matching marker would then leave every installed copy
+    // stale and silent about it. Comparing the text is one read, and it is the only
+    // thing that answers "is this what we would have written?".
+    const rendered = render(source, target);
+    let current: string;
+    try {
+      current = readFileSync(target.path, "utf8");
+    } catch {
+      current = "";
+    }
+    if (current === rendered) {
+      return { target, status: "current", detail: target.path };
+    }
+    if (options.dryRun) {
+      return { target, status: "updated", detail: `${target.path} (rewrite ${source.lineCount} lines)` };
+    }
+    writeFileSync(target.path, rendered);
+    return { target, status: "updated", detail: `${target.path} (same version, changed text)` };
   }
   if (options.dryRun) {
     return {

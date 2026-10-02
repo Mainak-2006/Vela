@@ -279,6 +279,32 @@ test("an outdated copy is reported as such and repaired on the next install", ()
   assert.equal(drift(target, source.version), "current");
 });
 
+test("an edited stub is rewritten even though the version still matches", () => {
+  // The stub is edited between releases, so the marker cannot be the whole test: a
+  // copy installed before the edit is stale the moment the text changes, and
+  // reporting `current` would leave every agent reading the old rules.
+  const { targets, source } = sandbox();
+  const target = find(targets, "agents");
+  applyTarget(target, source, quiet);
+  const rendered = readFileSync(target.path, "utf8");
+  writeFileSync(target.path, rendered.replace("# Vela", "# Vela (edited)"));
+
+  assert.equal(applyTarget(target, source, quiet).status, "updated");
+  assert.equal(readFileSync(target.path, "utf8"), rendered, "the installed copy must match the stub again");
+  assert.equal(applyTarget(target, source, quiet).status, "current");
+});
+
+test("a stale copy is reported by --dry-run without being written", () => {
+  const { targets, source } = sandbox();
+  const target = find(targets, "agents");
+  applyTarget(target, source, quiet);
+  const rendered = readFileSync(target.path, "utf8");
+  writeFileSync(target.path, `${rendered}\nstale\n`);
+
+  assert.equal(applyTarget(target, source, { ...quiet, dryRun: true }).status, "updated");
+  assert.notEqual(readFileSync(target.path, "utf8"), rendered, "a dry run must not repair anything");
+});
+
 test("a file vela did not write is a conflict, and --force is required", () => {
   const { targets, source } = sandbox();
   const target = find(targets, "agents-project");
