@@ -896,18 +896,18 @@ this.bag.add(
   }
 
   /**
-   * A non-void function must not be able to finish without producing a value.
-   *
-   * The test is `definitelyReturns` below, which is real (if small) flow analysis
-   * rather than a syntactic check on the last statement. An `if`/`else` chain
-   * whose arms all return is the single most common shape of a non-void function
-   * in a C-like language, so a purely syntactic rule would reject most
-   * well-written programs.
-   */
+* A non-void function must not be able to finish without producing a value.
+    *
+    * The test is `neverFallsThrough` below, which is real (if small) flow analysis
+    * rather than a syntactic check on the last statement. An `if`/`else` chain
+    * whose arms all return is the single most common shape of a non-`void` function
+    * in a C-like language, so a purely syntactic rule would reject most
+    * well-written programs.
+    */
   private requireTerminatingReturn(node: FunctionDeclaration): void {
     const returnType = this.resolveAnnotation(node.returnType);
     if (returnType.kind === "void") return;
-    if (definitelyReturnsBlock(node.body)) return;
+    if (neverFallsThroughBlock(node.body)) return;
     // The resolved type is named, not the `TypeNode` the source spelled: a
     // diagnostic has to describe the type the checker is reasoning about, and
     // `typeToString` is the one place that knows how to write one.
@@ -1793,40 +1793,54 @@ function describeFields(type: StructType): string {
 }
 
 /**
- * Whether a statement is guaranteed to transfer control out of the function,
- * either by returning or by not finishing.
+ * Whether control can reach the end of a statement.
+ *
+ * The question a non-`void` function has to answer is "can this finish without
+ * producing a value", and `return` is only one of the two ways to fail it: a
+ * statement that never completes fails it too, which is why this is named for
+ * control rather than for a returned value.
  *
  * This is deliberately a small, sound, and incomplete analysis. Soundness matters
- * most: it must never claim a function returns when it might not, or the
+ * most: it must never claim a function cannot finish when it might, or the
  * interpreter would be asked for a value that was never produced. Incompleteness
- * only ever costs a superfluous `return` at the end of a function.
+ * only ever costs a superfluous `return` at the end of a function, so every
+ * uncertain case below answers false.
  *
- * In particular, loops are treated as *not* returning, even `while (true) {...}`,
- * because proving that needs `break` analysis, and getting it wrong would be
- * unsound. The same reasoning rules out short-circuit expressions as the final
- * statement, since `return` is a statement in Vela and cannot appear inside one.
+ * What is still not proved: that a condition *expression* is always true, and
+ * anything about the values a loop body assigns — so `while (x)` is treated as a
+ * loop that may run zero times, whatever the body does to `x`. Short-circuit
+ * expressions are ruled out too, since `return` is a statement in Vela and
+ * cannot appear inside one.
  */
-function definitelyReturns(declaration: Declaration | Statement): boolean {
-  switch (declaration.kind) {
+function neverFallsThrough(statement: Declaration | Statement): boolean {
+  switch (statement.kind) {
     case "return":
       return true;
 
     case "block": {
-      const last = declaration.declarations[declaration.declarations.length - 1];
-      return last !== undefined && definitelyReturns(last);
+      const last = statement.declarations[statement.declarations.length - 1];
+      return last !== undefined && neverFallsThrough(last);
     }
 
     case "if": {
-      // Both arms must return, and an `if` with no `else` can fall through.
-      if (declaration.elseBranch === null) return false;
-      return definitelyReturns(declaration.thenBranch) && definitelyReturns(declaration.elseBranch);
+      // Both arms must transfer control, and an `if` with no `else` can fall through.
+      if (statement.elseBranch === null) return false;
+      return neverFallsThrough(statement.thenBranch) && neverFallsThrough(statement.elseBranch);
     }
 
-    // A loop may run zero times, so it never counts as returning. A `struct`
-    // declaration is not a statement at all — it produces no value and cannot
-    // transfer control — so it belongs with the rest of the "nothing happens here".
     case "while":
+      return loopNeverFallsThrough(statement.condition, statement.body);
+
     case "for":
+      // An omitted condition is the C form of an unconditional loop, but Vela's
+      // grammar requires all three parts, so the check reads the field as optional
+      // rather than assuming a spelling that cannot occur.
+      return loopNeverFallsThrough(statement.condition, statement.body);
+
+    // A `struct` declaration is not a statement at all — it produces no value and
+    // cannot transfer control — so it belongs with the rest of the "nothing happens
+    // here". `break` and `continue` leave a loop, so they *can* reach the end of
+    // one, and are handled where the loop is analysed rather than here.
     case "letDecl":
     case "constDecl":
     case "fnDecl":
@@ -1839,9 +1853,64 @@ function definitelyReturns(declaration: Declaration | Statement): boolean {
   }
 }
 
-function definitelyReturnsBlock(block: Block): boolean {
+/**
+ * Whether a loop cannot finish normally.
+ *
+ * A loop ends in one of three ways, and only two of them matter here:
+ *
+ * 1. The condition goes false. This is the one that reaches whatever statement
+ *    follows the loop, so it has to be ruled out — and only a literal `true` is.
+ * 2. A `break` targeting this loop, which leaves it having produced nothing.
+ * 3. The body finished with the condition still true, so the next iteration runs.
+ *
+ * A body that returns on every path is deliberately *not* enough, and that is the
+ * mistake this rule is easiest to get wrong. `while (n > 0) { return n; }` returns
+ * on every iteration, but the loop may run **zero** times — and then control
+ * reaches whatever comes after it, with no value produced. Accepting the shape
+ * would be unsound, so the body is not consulted at all.
+ *
+ * `continue` needs no rule of its own for the same reason: it jumps back to the
+ * condition test, and re-testing a literal `true` cannot end the loop.
+ */
+function loopNeverFallsThrough(condition: Expression | null, body: Statement): boolean {
+  // A `for` header may leave the condition out, which is the C spelling of an
+  // unconditional loop — and it is spellable here, so not a hypothetical.
+  if (condition !== null && !(condition.kind === "booleanLiteral" && condition.value === true)) {
+    return false;
+  }
+  return !breaksOut(body);
+}
+
+/**
+ * Whether a `break` inside this statement would leave the loop being analysed.
+ *
+ * A `break` belongs to the innermost loop enclosing it, so one inside a nested loop
+ * leaves *that* loop and says nothing about this one — the walk stops there rather
+ * than counting it. A nested `fn` is opaque for a different reason: `break` cannot
+ * cross a function boundary at all. An `if` is transparent, because either arm can
+ * hold the `break`.
+ */
+function breaksOut(statement: Declaration | Statement): boolean {
+  switch (statement.kind) {
+    case "break":
+      return true;
+
+    case "block":
+      return statement.declarations.some(breaksOut);
+
+    case "if":
+      return breaksOut(statement.thenBranch) || (statement.elseBranch !== null && breaksOut(statement.elseBranch));
+
+    // A nested loop's own `break` is its own, and there is nothing else to look at:
+    // `break` is a statement, so it cannot appear inside an expression.
+    default:
+      return false;
+  }
+}
+
+function neverFallsThroughBlock(block: Block): boolean {
   const last = block.declarations[block.declarations.length - 1];
-  return last !== undefined && definitelyReturns(last);
+  return last !== undefined && neverFallsThrough(last);
 }
 
 /** Predicate reused by the checker's numeric operator rules. */

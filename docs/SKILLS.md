@@ -946,7 +946,35 @@ fn f(n: number): number {
 }
 ```
 
-It treats a **loop** as never returning, which is sound but incomplete — see
+It also proves an **unconditional loop** that cannot finish normally, so a
+function may end with one instead of a trailing sentinel return:
+
+```vela
+fn always(n: number): number {
+    while (true) { return n; }         // literal true: no zero-iteration exit
+}
+
+fn forever(n: number): number {
+    for (;;) { print(n); }             // omitted for-condition is unconditional
+}
+```
+
+The rule is about control reaching the end, not about a `return` appearing. A loop
+that never completes at all satisfies it too — `while (true) { print(n); }` is
+accepted, because the call simply never comes back:
+
+```vela
+fn hang(n: number): number {
+    while (true) { print(n); }         // no return: there is no way out
+}
+```
+
+The escape that rules a loop out is **`break`** for that loop, at any depth in
+the body, because it leaves the loop without a value. A `break` in a *nested*
+loop leaves the nested one and says nothing about this one. `continue` is safe
+under an unconditional loop: it jumps back to a test that cannot end the loop.
+
+What is still unproved is listed in
 [section 18](#18-design-rationale-and-known-gaps).
 
 ---
@@ -2676,12 +2704,15 @@ The remaining restrictions still stand on the original rule:
 ### Known limitations
 
 **Return analysis is sound but incomplete.** It handles early returns and
-`if`/`else` correctly, but treats a loop as never returning. So this is
-rejected even though every execution returns:
+`if`/`else` correctly, and proves an unconditional loop that cannot finish
+normally: `while (true)`, `for (;;)`, or `for (...; true; ...)`, as long as no
+`break` escapes that loop. What it cannot prove is that a *condition expression*
+is always true, and it does not infer that a loop body must run even once. So
+this is rejected:
 
 ```vela
-fn f(n: number): number {
-    while (n > 0) { return 1; }
+fn f(x: bool): number {
+    while (x) { return 1; }    // x might be false before the first iteration
     // error: a function returning 'number' must end with a return statement
 }
 ```
@@ -2689,14 +2720,17 @@ fn f(n: number): number {
 The fix is a trailing `return`:
 
 ```vela
-fn f(n: number): number {
-    while (n > 0) { return 1; }
+fn f(x: bool): number {
+    while (x) { return 1; }
     return 0 - 1;   // sentinel
 }
 ```
 
-Being wrong in the safe direction is the right trade for a first version, and it
-is the most significant known gap in the checker.
+The same is true even when the body returns on every path. `while (n > 0) {
+return n; }` still might run zero times. The rule is deliberately blind to what
+the body does to the condition's variables — proving that needs real dataflow
+analysis, and guessing would be wrong in the unsafe direction. `continue` needs
+no special case under an accepted loop because re-testing `true` cannot end it.
 
 **Narrowing is not invalidated by a call.** The checker knows what a test proved and
 what an assignment removed, but not that a called function assigned to a name, so
@@ -2785,6 +2819,10 @@ Before calling a `.vela` program correct, verify each of these:
       every optional field is after every required one.
 - [ ] Every variable is declared before it is used. Functions are exempt —
       signatures are hoisted, so a forward or mutual call is fine.
+- [ ] Every non-`void` function ends on a path that returns. A trailing `return`
+      satisfies it, and so does a final unconditional loop (`while (true)`,
+      `for (;;)`, or `for (...; true; ...)`) with no `break` of that loop to
+      escape it.
 - [ ] Every non-`void` function ends with a `return` that the checker will
       accept — add a trailing return if any earlier return is inside a loop.
 - [ ] `break` and `continue` are inside a loop; `return` is inside a function.

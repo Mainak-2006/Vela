@@ -636,6 +636,90 @@ describe("interpreter: control flow", () => {
   });
 });
 
+describe("interpreter: a function ending in a loop", () => {
+  // These functions have no `return` after the loop because there is no path that
+  // reaches one, so the value has to come out of the loop body itself. Running them
+  // is the other half of the check: proving the shape is sound is what makes the
+  // interpreter safe to hand them a value it never produced.
+  it("returns from inside an infinite loop", () => {
+    const text = `
+      fn f(n: number): number {
+        while (true) { return n * 2; }
+      }
+      print(f(21));
+    `;
+    assert.equal(printed(text), "42");
+  });
+
+  it("returns from inside a for whose condition is the literal true", () => {
+    const text = `
+      fn f(): number {
+        for (let i: number = 0; true; i = i + 1) { return i * 10; }
+      }
+      print(f());
+    `;
+    assert.equal(printed(text), "0");
+  });
+
+  it("takes the return from whichever arm of a loop body runs", () => {
+    const text = `
+      fn f(n: number): number {
+        while (true) {
+          if (n % 2 == 0) { return 2; }
+          else { return 3; }
+        }
+      }
+      print(f(4));
+      print(f(5));
+    `;
+    assert.equal(printed(text), "2\n3");
+  });
+
+  it("goes round again on a continue rather than falling out", () => {
+    // `continue` under `while (true)` re-tests a condition that cannot go false, so
+    // the counter is what eventually reaches the return.
+    const text = `
+      fn f(n: number): number {
+        let i: number = 0;
+        while (true) {
+          if (i < n) { i = i + 1; continue; }
+          return i;
+        }
+      }
+      print(f(3));
+    `;
+    assert.equal(printed(text), "3");
+  });
+
+  it("stops at a nested loop's break and returns after it", () => {
+    // The `break` belongs to the inner loop, so it is the statement after the outer
+    // loop that runs next — which is why the outer one needs a return there.
+    const text = `
+      fn f(c: bool): number {
+        while (true) {
+          while (c) { break; }
+          return 7;
+        }
+      }
+      print(f(true));
+    `;
+    assert.equal(printed(text), "7");
+  });
+
+  it("skips a nested loop's continue and keeps going", () => {
+    const text = `
+      fn f(): number {
+        while (true) {
+          for (let i: number = 0; i < 3; i = i + 1) { continue; }
+          return 9;
+        }
+      }
+      print(f());
+    `;
+    assert.equal(printed(text), "9");
+  });
+});
+
 describe("interpreter: short-circuit evaluation", () => {
   it("does not evaluate the right side of && when the left is false", () => {
     // `b` is never read, so no error is produced; if && were eager this would fail.

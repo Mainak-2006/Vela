@@ -378,9 +378,19 @@ interpreter is obviously correct, at the cost of speed.
 
 **Return-type analysis is sound but incomplete.** A non-`void` function must
 return on every path, or the checker rejects it. It handles early returns and
-`if`/`else` correctly, but treats a loop as not returning — so a function whose
-only return is inside a `while` is wrongly rejected. Being wrong in the safe
-direction is the right trade for a first version.
+`if`/`else`, and it proves an unconditional loop that cannot finish normally —
+`while (true)`, `for (;;)`, or `for (...; true; ...)` with no `break` escaping
+that loop — so a function may end with one instead of a sentinel `return`. The
+rule is about control reaching the end rather than about a `return` appearing,
+so `while (true) { print(n); }` satisfies it too: the call never comes back. What
+is left is proving that a condition *expression* is always true, or that a loop
+body runs even once, which needs real dataflow analysis; being wrong in the safe
+direction is the right trade.
+
+**The loop rule tracks `break` by target, not by spelling.** A `break` in a
+nested loop leaves that loop and says nothing about the one around it, and
+nothing inside a nested `fn` is considered at all. `continue` is harmless under
+an accepted loop because it jumps back to a test that cannot end the loop.
 
 **Narrowing is tracked per binding, and one hole is documented rather than
 closed.** A comparison against `null` records what it proved about a *place* — a

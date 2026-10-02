@@ -790,10 +790,6 @@ describe("checker: declarations", () => {
     );
   });
 
-  it("does not count a loop as returning, even an infinite one", () => {
-    expectError("fn f(n: number): number { while (true) { return 1; } }", /must end with a return statement/);
-  });
-
   it("does not count a conditional return inside a loop as returning", () => {
     expectError(
       "fn f(n: number): number { for (let i: number = 0; i < n; i = i + 1) { if (i == 2) { return i; } } }",
@@ -811,6 +807,116 @@ describe("checker: declarations", () => {
 
   it("rejects a return value in a void function", () => {
     expectError("fn f(): void { return 1; }", /a function returning 'void' cannot return a value/);
+  });
+});
+
+describe("checker: return analysis through loops", () => {
+  // The question a non-void function has to answer is "can control reach the end",
+  // and a loop normally lets it: the condition can go false and the statement after
+  // runs. These are the shapes that cannot, so a function may end with one instead
+  // of a sentinel `return`.
+  it("accepts an infinite loop whose body returns", () => {
+    expectOk("fn f(n: number): number { while (true) { return 1; } }");
+  });
+
+  it("accepts an infinite loop that never finishes at all", () => {
+    // No value is produced, and none is needed: the call never comes back. That is
+    // why the rule is about control reaching the end rather than about a `return`.
+    expectOk("fn f(): number { while (true) { print(1); } }");
+  });
+
+  it("accepts a for whose condition is the literal true", () => {
+    expectOk("fn f(): number { for (let i: number = 0; true; i = i + 1) { return i; } }");
+  });
+
+  it("accepts a for with no condition at all, which is unconditional", () => {
+    // The C spelling of `while (true)`, and spellable in Vela.
+    expectOk("fn f(): number { for (;;) { print(1); } }");
+  });
+
+  it("accepts a loop whose body is an if/else where both arms return", () => {
+    expectOk("fn f(c: bool): number { while (true) { if (c) { return 1; } else { return 2; } } }");
+  });
+
+  it("accepts a continue, because re-testing a literal true cannot end the loop", () => {
+    expectOk(
+      "fn f(c: bool): number { while (true) { if (c) { continue; } return 1; } }",
+    );
+  });
+
+  it("ignores a break that belongs to a nested loop", () => {
+    // `break` leaves the innermost loop enclosing it, so this one ends the inner
+    // `while`, not the `while (true)` around it. Counting it would reject correct
+    // code — and this program does return, on the outer loop's first iteration.
+    expectOk("fn f(c: bool): number { while (true) { while (c) { break; } return 1; } }");
+  });
+
+  it("ignores a continue that belongs to a nested loop", () => {
+    expectOk(
+      "fn f(): number { while (true) { for (let i: number = 0; i < 3; i = i + 1) { continue; } return 1; } }",
+    );
+  });
+
+  it("does not look inside a nested function", () => {
+    // A `break` cannot cross a function boundary, so nothing in here says anything
+    // about the loop around it.
+    expectOk("fn f(): number { while (true) { fn inner(): number { return 1; } print(1); } }");
+  });
+
+  it("counts a loop in one arm of an if/else", () => {
+    expectOk("fn f(c: bool): number { if (c) { while (true) { return 1; } } else { return 2; } }");
+  });
+
+  it("rejects an infinite loop with a break", () => {
+    // The `break` is a way out that produces nothing, which is the case the rule
+    // exists to exclude.
+    expectError("fn f(): number { while (true) { break; } }", /must end with a return statement/);
+  });
+
+  it("rejects an infinite loop that can break past its return", () => {
+    expectError(
+      "fn f(x: bool): number { while (true) { if (x) { return 1; } break; } }",
+      /must end with a return statement/,
+    );
+  });
+
+  it("rejects a testable loop whose body always returns, because it may run zero times", () => {
+    // The body returns on every iteration, but `n` may be 0 or less — then the
+    // body never runs and control reaches the end of the function with nothing
+    // produced. Proving otherwise needs real dataflow analysis.
+    expectError(
+      "fn f(n: number): number { while (n > 0) { return n; } }",
+      /must end with a return statement/,
+    );
+  });
+
+  it("rejects a testable loop whose body returns under a condition", () => {
+    expectError(
+      "fn f(c: bool): number { while (c) { if (c) { return 1; } else { return 2; } } }",
+      /must end with a return statement/,
+    );
+  });
+
+  it("still rejects a loop whose body only sometimes returns", () => {
+    expectError("fn f(c: bool): number { while (c) { if (c) { return 1; } } }", /must end with a return statement/);
+  });
+
+  it("still rejects a loop whose body returns under a condition", () => {
+    expectError(
+      "fn f(n: number): number { while (n > 0) { if (n == 1) { return 1; } } }",
+      /must end with a return statement/,
+    );
+  });
+
+  it("rejects a for whose body always returns, because it may run zero times", () => {
+    expectError(
+      "fn f(): number { for (let i: number = 0; i < 3; i = i + 1) { return i; } }",
+      /must end with a return statement/,
+    );
+  });
+
+  it("does not count a loop as returning when the body merely prints", () => {
+    expectError("fn f(c: bool): number { while (c) { print(1); } }", /must end with a return statement/);
   });
 });
 

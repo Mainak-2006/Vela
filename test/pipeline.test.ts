@@ -79,6 +79,36 @@ test("a nullable program runs through every stage", () => {
   assert.deepEqual(result.diagnostics, []);
 });
 
+test("a function ending in a loop runs through every stage and returns a value", () => {
+  // The end-to-end path for return analysis through loops: a function with no
+  // `return` after its loop, which compiles only if the checker can prove nothing
+  // reaches the end — and then actually produces the value the signature promised.
+  const { lines, result } = evaluate(`
+    fn f(n: number): number {
+      while (true) { return n; }
+    }
+    fn g(): number {
+      while (true) {
+        for (let i: number = 0; i < 3; i = i + 1) { continue; }
+        return 2;
+      }
+    }
+    print(f(1));
+    print(g());
+  `);
+  assert.equal(result.stage, "ok");
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(lines, ["1", "2"]);
+});
+
+test("a loop that can fall through is still reported at the check stage", () => {
+  // The other half of the same rule: proving the shape is only sound if the shapes
+  // that do fall through keep failing.
+  const result = compile("loop.vela", "fn f(): number { while (true) { break; } }");
+  assert.equal(result.stage, "check");
+  assert.match(result.diagnostics[0]!.message, /must end with a return statement/);
+});
+
 test("null in a non-nullable position is reported at the check stage", () => {
   const result = compile("bad.vela", "let x: number = null;");
   assert.equal(result.stage, "check");

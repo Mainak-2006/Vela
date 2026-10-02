@@ -621,11 +621,29 @@ the sign of the left operand, so `-7 % 2` is `-1`, and it works on fractions, so
 `8`. There is no integer division operator.
 
 **A non-`void` function must return on every path,** or the checker rejects it.
-This is sound but incomplete: it handles early returns and `if`/`else`, but it
-treats a loop as not returning, so a function whose only `return` is inside a
-`while` is wrongly rejected with "a function returning 'number' must end with a
-return statement". Being wrong in the safe direction is the right trade for a
-first version, and it is the most significant known limitation in the checker.
+It handles early returns and `if`/`else`, and it proves an **unconditional loop**
+that cannot finish normally: `while (true)`, `for (;;)`, or
+`for (...; true; ...)`, as long as no `break` escapes that loop. So a function
+may end with one instead of a trailing sentinel `return`:
+
+```vela
+fn always(n: number): number {
+    while (true) { return n; }
+}
+```
+
+A loop never has to produce a *value* to satisfy the rule, only never to finish:
+`while (true) { print(n); }` is accepted as the last statement of a function
+returning `number`, because the call never comes back. What the checker cannot
+prove is that a condition *expression* is always true, or that a loop body runs
+even once, so `while (x) { return 1; }` and `while (n > 0) { return n; }` still
+need a trailing `return`.
+
+The escape that rules a loop out is a `break` for **that** loop at any depth,
+because it leaves without a value. A `break` inside a *nested* loop targets that
+loop and is ignored here, and nothing inside a nested `fn` is considered at all.
+`continue` is harmless under an accepted loop because it jumps back to a test
+that cannot end the loop.
 
 **Functions may be used before they are written; variables may not.** A block may
 shadow an outer name (`{ let s: string = "i"; print(s); }` is fine), but
