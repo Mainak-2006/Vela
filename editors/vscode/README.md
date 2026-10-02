@@ -37,18 +37,24 @@ code --install-extension vela-language-*.vsix
 
 | Category | Tokens |
 | --- | --- |
-| Declarations | `let`, `fn` |
+| Declarations | `let`, `const`, `fn`, `struct` |
 | Control flow | `if`, `else`, `while`, `for`, `break`, `continue`, `return` |
-| Builtins | `print` |
-| Types | `number`, `string`, `bool`, `void` |
-| Literals | `true`, `false` |
-| Operators | `+` `-` `*` `/` `%` `!` `=` `==` `!=` `<` `<=` `>` `>=` `&&` `\|\|` |
-| Punctuation | `(` `)` `{` `}` `,` `;` `:` |
+| Builtins | `print`, `tostring`, `tonumber`, `typeOf`, `len`, `trunc`, `floor`, `ceil`, `round`, `abs`, `min`, `max`, `idiv`, `read`, `upper`, `lower`, `trim`, `startsWith`, `endsWith`, `indexOf`, `substr`, `repeat`, `replace`, `append` |
+| Types | `number`, `string`, `bool`, `void`, `function` |
+| Literals | `true`, `false`, `null` |
+| Operators | `+` `-` `*` `/` `%` `!` `=` `==` `!=` `<` `<=` `>` `>=` `&&` `\|\|` `++` `--` `+=` `-=` `*=` `/=` `%=` `->` `?` |
+| Punctuation | `(` `)` `{` `}` `[` `]` `,` `;` `:` |
 | Comments | `//`, `/* */` (not nestable) |
 | Numbers | `123`, `1_000_000`, `3.14`, `1.5e-3` |
 
-Vela has no `[]` brackets — `[` is not even a token — so this extension deliberately
-does not auto-close them.
+`?` is the nullable suffix on a type — `number?`, `Node?`, `number?[]` — not a
+ternary, and Vela has no `?.` or `??`. It also marks an optional struct field when
+it follows the field's *name* — `label?: string` — so the same character is
+highlighted in both positions.
+
+`[` and `]` are array brackets: a literal `[1, 2]`, a type `number[]`, or an index
+`xs[0]`. They highlight, but the extension does not auto-close them: `[` opens on
+both of the first two, and auto-closing an index would fight the type bracket.
 
 ## License
 

@@ -47,7 +47,8 @@ right and the guess is wrong.
 ## 1. What Vela is
 
 Vela is a small, imperative, C-shaped, statically-typed language with four
-primitive types and a tree-walking interpreter.
+primitive types, arrays, structs, nullable types, and a tree-walking
+interpreter.
 
 ```console
 $ npm install --global vela-lang
@@ -67,9 +68,11 @@ for (let i: number = 1; i <= 20; i = i + 1) {
 }
 ```
 
-Types: `number`, `string`, `bool`, `void`, and the bare `function`. Nothing is
-inferred — every variable, every parameter, and every return type is written out.
-There are no collections, no modules, no classes, and no user-defined types.
+Types: `number`, `string`, `bool`, `void`, the bare `function`, fixed-length arrays
+written `T[]`, a nullable written `T?` with `null` as its absence, and one
+user-defined type — the `struct`. Nothing is inferred: every variable, every
+parameter, and every return type is written out. There are no modules, no classes,
+and no unions.
 
 Vela's design goal is legibility over convenience. Almost every restriction below
 exists because the thing it removes is also the thing that makes a program hard
@@ -166,22 +169,31 @@ feature elsewhere, and every one of them is a compile error in Vela.
 | `let x = 1;` | Types are mandatory | `let x: number = 1;` |
 | `let y: number = i++;` | `++` is a statement, so it has no value | `i++;` on its own line |
 | `i + j++` | Same: nothing to add | `i++;` then use `i` |
-| `a[i] = x`, arrays, lists | No collections exist | Model a sequence with a function + recursion, or a fixed set of variables |
-| `for (x of xs)`, `for (let x in xs)` | `for` has exactly one C-style form | Three-part C `for`, or a `while` with a manual index |
+| `xs[len(xs)] = x` | An array's length never changes | `xs = append(xs, x)`, which returns a new array |
+| `for (x of xs)`, `for (let x in xs)` | `for` has exactly one C-style form | `for (let i: number = 0; i < len(xs); i++) { ... }` |
+| `[1, 2]` as a value | No top-level array constants | `let xs: number[] = [1, 2];` |
+| `xs.length`, `xs.push(v)`, `xs.sort()` | No fields, and nothing grows in place | `len(xs)`, `xs = append(xs, v)`, [section 11](#arrays) |
+| A list of mixed types, or arrays of differing length | `T[]` is one element type | Nested `T[]`, or parallel arrays |
 | `a ? b : c` | No ternary | `if (a) { b = 1; } else { b = 2; }` |
-| `a ?? b`, `?.` | No optional chaining or nullish coalescing | `if (a != "") { ... }` |
+| `a ?? b`, `?.` | No optional chaining or nullish coalescing | `if (a != null) { ... }`, then use `a` |
+| `a ?: b`, `a?.b ?: c` | Same: a fallback is an `if` | `if (a != null) { print(a); } else { print(c); }` |
+| `x!.y`, `as number`, `is number` | No assertions and no casts — the answer is a test | `if (x != null) { x.y }` |
+| `T | U` | No unions | Two names, or `T?` where absence is the only other answer |
 | `fn f() {}` | Return type is mandatory | `fn f(): void { ... }` |
 | `def f(): pass` / `None` | No other keywords, no `None` | `return;` in a `void` function |
 | `while (x) { ... }` truthy check | Conditions must be `bool` | `while (x != 0) { ... }` |
 | `"a" < "b"` | Ordering comparisons are numeric-only | `==` and `!=` only; use `len(s)` for magnitude |
 | `"a" + 1` | No coercion | `"a" + tostring(1)` |
 | `import`, `require`, `use` | No modules | Everything is one file; the global scope is the only scope |
-| `class`, `struct`, `enum`, `interface` | No user-defined types | Functions over primitives |
+| `class`, `interface`, `enum`, `impl`, `trait` | No classes or enums; a `struct` is the one named type | `struct Point { x: number; }`, or a function over `number` |
+| `p.method()` | No methods; a struct is data and nothing else | `fn move(p: Point, dx: number): Point` |
+| `Point { x: 1 }` | No struct literal | `Point(1)` — one argument per field |
+| `fn f(x?: number)` | No optional *parameters*; an optional *field* is not the same | `fn f(x: number?)`, and test for `null` |
 | Generic `T`, `list<T>` | No generics | A function per element type |
 | `public` / `private` / `static` | No access modifiers | Top-level `fn` is the whole API |
-| `s.length`, `s.upper()`, `s.split()`, `s[i]` on a non-string | `len()` and `s[i]` are all there is | `len(s)`, `s[i]`; build the rest with `+` |
+| `s.length`, `s.upper()`, `s.split()` | `len()` and `s[i]` are all there is | `len(s)`, `s[i]`; build the rest with `+` |
 | `Math.sqrt`, `Math.pow` | Only the eight numeric built-ins exist | `trunc`, `abs`, ... then write `sqrt` — see [section 11](#11-standard-library-recipes) |
-| `null`, `undefined`, `NaN` as a value | `null` is unnameable and unchecked | Sentinel numbers (`0 - 1`, `-1`) with a documented meaning |
+| `undefined`, `NaN`, `None` | No such values | `null` in a `T?`, or a documented sentinel such as `0 - 1` |
 | `f(1,)` trailing comma | No trailing commas in argument or parameter lists | `f(1)` |
 | `'single quotes'` | Double quotes only | `"double quotes"` |
 | `f"text {x}"`, `\`templates\`` | No interpolation of any kind | `"text " + tostring(x)` |
@@ -195,11 +207,20 @@ feature elsewhere, and every one of them is a compile error in Vela.
 
 One of these constrains program *design* rather than just syntax:
 
-**No collections.** A string is a sequence rather than a collection: it can be
-indexed with `s[i]` and measured with `len`, and that is all. There is no way to
-hold a list, so anything over a sequence of values has to be flattened into
-`number`s, one variable per slot. See [section 11](#11-standard-library-recipes)
-for what that looks like in practice.
+**Arrays are fixed in length.** `T[]` holds any number of elements — but a number
+decided when the array was built. Nothing grows an array in place: a write past
+the end is a runtime error rather than a silent append, and `append` returns a
+*new* array whose caller must reassign. So a program that collects while it runs
+pays a copy per step:
+
+```vela
+let out: number[] = [];
+for (let i: number = 0; i < 3; i = i + 1) { out = append(out, i * i); }
+print(out);   // [0, 1, 4]
+```
+
+That is the trade for the rule, and the rule is the point: a write past the end
+would otherwise hide the bug that wrote the wrong index.
 
 ---
 
@@ -241,17 +262,21 @@ keywords are matched whole, not by prefix.
 
 ### Keywords
 
-Fourteen reserved words:
+Nineteen reserved words:
 
 ```
-let  fn  return  if  else  while  for  break  continue  print
-number  string  bool  void  true  false
+let  const  fn  struct  return  if  else  while  for  break  continue  print
+number  string  bool  void  function  true  false  null
 ```
 
-`number`, `string`, `bool`, and `void` are type keywords and are equally
-reserved. They are *distinct token kinds* from the same lexeme used elsewhere,
-which is why `"number"` is a string but bare `number` in an expression position is
-a parse error — the lexer already knows which one it is.
+`number`, `string`, `bool`, `void`, and `function` are type keywords and are
+equally reserved. They are *distinct token kinds* from the same lexeme used
+elsewhere, which is why `"number"` is a string but bare `number` in an
+expression position is a parse error — the lexer already knows which one it is.
+
+`null` is a literal, not a type keyword: it is a value of type `null`, and there
+is no way to write it where a type is expected, because a nullable type is written
+`T?` and absence is a value rather than a type you can name.
 
 ### Numbers
 
@@ -303,6 +328,9 @@ Complete list, tightest binding last:
 There is no `++`, `--`, `+=`, `-=`, `*=`, `/=`, `**`, `??`, `?:`, `>>`, `<<`, or
 any bitwise operator. `>>` lexes as two separate `>` tokens.
 
+`->` is the one operator that is not an operator: it appears only inside a type,
+as in `fn(number) -> number`, and is a syntax error anywhere else.
+
 ### Diagnostic positions
 
 Every token carries a `SourceLocation` of `offset`, `length`, `line`, and
@@ -315,9 +343,12 @@ token's column is meaningless and prints as `-1`.
 
 ```
 program       ::= declaration *
-declaration   ::= fnDecl | letDecl | statement
+declaration   ::= fnDecl | letDecl | constDecl | structDecl | statement
+structDecl    ::= "struct" identifier "{" { field } "}"
+field         ::= identifier [ "?" ] ":" T ";"
 fnDecl        ::= "fn" identifier "(" params ")" ":" T block
 letDecl       ::= "let" identifier ":" T "=" expression ";"
+constDecl     ::= "const" identifier ":" T "=" expression ";"
 params        ::= [ param { "," param } ]
 param         ::= identifier ":" T
 T             ::= "number" | "string" | "bool" | "void"
@@ -358,10 +389,96 @@ let ready: bool = true;
 - A variable cannot have type `void` — `void` is only a return type.
 - Redeclaring a name in the same scope is an error.
 - A block may shadow an outer name.
-- Top-level statements are allowed, but only `let` and `fn` create top-level
-  bindings. A bare `print(...)` or a `for` loop at file scope is fine.
+- Top-level statements are allowed, but only `let`, `const`, and `fn` create
+  top-level bindings. A bare `print(...)` or a `for` loop at file scope is fine.
+
+### Const
+
+```vela
+const MAX: number = 3;
+const LABEL: string = "count";
+```
+
+`const` is spelled and typed exactly like `let`, binds in the same scope, and
+shadows the same way. The one difference is that the name can never be assigned
+to again:
+
+```vela
+const K: number = 1;
+K = 2;      // error: 'K' is declared with 'const' and cannot be assigned to
+K += 2;     // the same error — '+=' is sugar for 'K = K + 2'
+K++;        // the same error
+```
+
+- The rule follows the **name**, not the declaration's position. A `const` at the
+  top of a file is still a `const` inside a loop inside a function, so a distant
+  assignment is rejected too.
+- It is a **compile-time** rule. The interpreter stores a `const` exactly as it
+  stores a `let`, and nothing about the value is made immutable. Until there are
+  arrays and structs, every value is already immutable, so the distinction does
+  not yet have anything to protect.
+- A block may still shadow a `const` with a new declaration; the new binding is
+  its own name, so this is not a violation.
+- `const` is accepted in a `for` header, which is worth it for a loop that
+  deliberately never updates its own counter and is driven by something else:
+  `let done: number = 0; for (const i: number = 42; done < 3; ) { print(i); done = done + 1; }`
+  prints `42` three times. Note that `const` makes a loop's *own* update
+  impossible, so the counter has to live outside — `i++` is a compile error
+  there.
 
 ---
+
+### Optional struct fields
+
+A `?` after a field's **name** makes the field optional — the constructor may leave
+it out, and the field's type becomes `T?`. The two positions answer two different
+questions, so they are two different spellings:
+
+```vela
+struct Config { retries: number; label?: string; note?: string; }
+
+let a: Config = Config(3);                     // label: null, note: null
+let b: Config = Config(3, "prod");             // label: prod,  note: null
+let c: Config = Config(3, "prod", "written");  // all three given
+let d: Config = Config(3, null);               // the same as `a`
+```
+
+An omitted field is stored as `null`, which is the whole of its semantics:
+`Config(3) == Config(3, null, null)`, `typeOf` is unchanged, and a test against
+`null` narrows the field exactly as it would a variable.
+
+```vela
+struct Config { retries: number; label?: string; }
+
+fn labelOf(c: Config): string {
+    if (c.label != null) { return c.label; }   // a 'string' from here down
+    return "(none)";
+}
+```
+
+Because the fields are filled in order, the optional ones must be a **suffix**.
+`struct Bad { label?: string; retries: number; }` is a parse error naming
+`retries`: there is no way for an omitted field to sit between two given ones, as
+the argument for it would have nothing in front of it. Matching arguments by name
+instead would need named arguments, which is a much larger feature, so the rule is
+about position rather than syntax. The diagnostic is reported once per struct, at
+the first field that breaks the order — every later one breaks it too, and one
+mistake deserves one message.
+
+Two more are refused at the declaration: `label?: string?`, because the field is
+already nullable and a second `?` would change nothing, and `y?: void`, because
+there is no value for absence to be absent from.
+
+An optional field is **not a default value** — nothing is assumed, the field is
+`null` until something writes to it, and the write is ordinary:
+
+```vela
+let c: Config = Config(3);
+c.label = "later";   // Config(retries: 3, label: later)
+```
+
+Struct *parameters* are a separate feature and are not in Vela: `fn f(x?: number)`
+is a parse error, and `fn f(x: number?)` is the way to accept absence.
 
 ## 6. Statements
 
@@ -490,7 +607,9 @@ Precedence, loosest to tightest. Each binary level is **left-associative**.
 
 ```
 expression   ::= assignment
-assignment   ::= identifier ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ) assignment | or
+assignment   ::= identifier ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ) assignment
+               | indexed ( "=" | "+=" | "-=" | "*=" | "/=" | "%=" ) assignment
+               | or
 or           ::= and { "||" and }
 and          ::= equality { "&&" equality }
 equality     ::= comparison { ( "==" | "!=" ) comparison }
@@ -501,22 +620,53 @@ unary        ::= ( "-" | "!" ) unary | call
 call         ::= primary { ( "(" [ expression { "," expression } ] ")" )
                         | ( "[" expression "]" ) }
 primary      ::= number | string | "true" | "false"
+               | array
                | identifier | "(" expression ")"
+array        ::= "[" [ expression { "," expression } ] "]"
 ```
 
 ### Assignment
 
-Right-associative, and the left side **must be a bare identifier**.
+Right-associative, and the left side **must be an identifier or an index**.
 
 ```vela
-a = b = 3;     // assigns 3 to b, then to a — legal
-1 = 2;         // error: the left-hand side of '=' must be a variable
-(a) = 2;       // error, same
-a + 1 = 2;     // error, same
+a = b = 3;          // assigns 3 to b, then to a — legal
+xs[0] = xs[1] = 3;  // the same through two elements of two arrays
+1 = 2;              // error: the left-hand side of '=' must be a variable or an index
+(a) = 2;            // error, same
+a + 1 = 2;          // error, same
+f()[0] = 1;         // error: a call result cannot be assigned through
 ```
 
 An assignment is also an expression, so it produces a value. `print(x = 5);`
-prints `5`.
+prints `5`. An indexed assignment produces the value that was stored.
+
+**Only the final index of a chain is a target.** `grid[0][1] = 9` is a write into
+a sub-array reached from `grid`; `grid[0] = xs` would be replacing the sub-array
+itself, and is accepted only if `xs` is a `number[]` when `grid` is a `number[][]`.
+
+### Indexing
+
+`x[i]` reads, and `x[i] = v` writes one element. The index must be a `number`, and
+its value must be in `0 .. len(x) - 1`.
+
+| Type of `x` | `x[i]` is | `x[i] = v` is |
+| --- | --- | --- |
+| `string` | a one-code-unit `string` | error: a string has fixed length |
+| `T[]` | a `T` | a write of a `T` |
+| anything else | compile error | compile error |
+
+```vela
+let xs: number[] = [1, 2, 3];
+xs[0] = xs[2];      // legal: the same value, read and written
+xs[0] += 10;        // legal: sugar for xs[0] = xs[0] + 10
+let n: string = xs[0];   // error: 'xs[0]' has type 'number' but 'string' was expected
+let bad: number[] = ["a"];   // error: a literal has to be homogeneous
+```
+
+Suffixes share the loop with calls, so `f()[0]` and `s[0][1]` parse. Only a name at
+the *start* of a chain can be assigned through, which is a grammar rule rather
+than a type rule — see [section 15](#the-parser).
 
 ### Compound assignment and increment
 
@@ -530,6 +680,7 @@ interpreter knows they exist:
 | `x *= y` | `x = x * y` |
 | `x /= y` | `x = x / y` |
 | `x %= y` | `x = x % y` |
+| `xs[i] += y` | `xs[i] = xs[i] + y` |
 | `i++` | `i = i + 1` |
 | `i--` | `i = i - 1` |
 
@@ -563,7 +714,8 @@ header's `)`, which is what tells `i--;` from `- -1`.
 - Calls chain syntactically (`f(1)(2)` parses) but only a declared function name
   is callable, so the checker rejects the rest with `this is not a function`.
 - Index suffixes share the suffix loop with calls and chain the same way, so
-  `s[0][1]` and `f()[0]` parse.
+  `s[0][1]` and `f()[0]` parse. An index at the end of that chain can be assigned
+  through, so `g[0][1] = 9` is legal; a call cannot, so `f()[0] = 1` is reported.
 
 ### Grouping
 
@@ -575,13 +727,122 @@ override precedence.
 ## 8. Types and static rules
 
 ```
-T ::= "number" | "string" | "bool" | "void" | "function"
+T         ::= simple { suffix }
+suffix    ::= "[]" | "?"
+simple    ::= "number" | "string" | "bool" | "void" | "function" | signature
+signature ::= "fn" [ "(" T { "," T } ")" ] "->" T
 ```
 
-The first four are primitives. `function` is the odd one out: it names the *shape*
-of a value without naming a signature, and it is what makes it possible to store,
-pass, and return a function at all. There is no `any` in source, no `null`, no
-unions, no generics, and no inference.
+The first four `simple` types are primitives. `function` is the odd one out: it
+names the *shape* of a value without naming a signature, and it is what makes it
+possible to store, pass, and return a function at all. There is no `any` in
+source, no unions, no generics, and no inference.
+
+`[]` is an **array** and it binds to the whole type in front of it, so `number[]`
+is an array of numbers and `number[][]` is an array of those, with no parentheses.
+`void[]` is rejected outright: an array of absences could never be used, since
+every use of a `void` is already an error. Arrays are homogeneous, fixed in
+length, and compared by reference — see [section 10](#arrays).
+
+`?` is **nullable** and it may be written in either order with `[]`, because both
+are suffixes and the list is read left to right. `number?[]` is an array whose
+elements may be absent; `number[]?` is an array that may be absent. They are
+different types and neither is the special case.
+
+### Nullable types
+
+`T?` holds either a `T` or nothing, and `null` is the nothing:
+
+```vela
+let missing: number? = null;     // absent
+let present: number? = 5;        // a number, in a type that permits absence
+let plain: number = 5;           // never absent
+```
+
+`null` is a type of its own rather than "any type, possibly absent", which is
+what keeps the two apart: a `T?` is *about* the absence, and `null` is the
+absence. There is no `Option` and no `Some`, so there is nothing to match on and
+nothing to unwrap with — a comparison against `null` is both.
+
+```vela
+fn describe(n: number?): string {
+    if (n == null) { return "absent"; }
+    return tostring(n + 1);          // `n` is a `number` here — see narrowing
+}
+```
+
+**The four assignability facts.** A `T` and `null` both fit a `T?`, because each
+is one of the two things it allows. Nothing fits *out* of one: `let n: number =
+maybe;` is rejected even when `maybe` holds a number right now, because the type
+says it might not and the checker does not run the program to find out.
+
+| From | To | |
+| --- | --- | --- |
+| `T` | `T?` | correct |
+| `null` | `T?` | correct |
+| `T?` | `T?` | correct |
+| `T?` | `U?` | only when `T` fits `U` |
+| `T?` | `T` | **error** |
+| `T?` | `U` | **error** |
+
+`void?` and a second `?` are both parse errors: there is no value for absence to
+be absent *from*, and `number??` would ask the same question twice, so the
+constructor that builds a nullable collapses `T??` to `T?` and the two can never
+compare unequal while being the same type.
+
+**What can be compared with `null`.** `null` compares with anything — including a
+value that cannot be absent, where the test is always false — because the
+alternative is a test that cannot be written once a type has been pinned down.
+Vela reports faults rather than tautologies, so it says nothing about that case.
+Everything else still requires matching types, and two nullable types match only
+when their inner types do: `number? == string?` is an error, and so is
+`number? == number`, because the second may be absent and the first may not.
+
+**Ordering is not defined for a nullable.** `x < 1` where `x` is `number?` is an
+error; there is no number on the absent side to compare.
+
+### Narrowing
+
+A nullable is useless if it cannot be used, so a comparison against `null` narrows
+the rest of the branch it appears in — and the checker tracks it per *binding*
+rather than per name, which is what makes shadowing safe.
+
+```vela
+fn firstLetter(s: string?): string {
+    if (s != null) { return s[0]; }   // `s` is a `string` in this block
+    return "-";                       // and the else needs no test of its own
+}
+```
+
+- **An `if` with no `else` whose body always leaves** narrows what comes after it,
+  because those statements are only reached the other way. That is the guard
+  clause in `describe` above.
+- **A loop body and a `for` update** are checked as though the condition held, and
+  the statements after a `while` as though it did not — unless the body can leave
+  first, which is the one case the analysis refuses.
+- **`&&` narrows its right operand.** `||` narrows neither, because it is not known
+  which side was true: `x != null && x > 0` works, `x == null || y == null` teaches
+  nothing. Each half is read under the one before it, so a chain works:
+  `p.next != null && p.next.next != null`.
+- **Writing to a name or a field drops the fact** about it, and about anything
+  reached through it: after `p.next = null`, `p.next` is a `Node?` again.
+- **An indexed element is not narrowed.** `xs[0]` has no fixed identity, so a test
+  of it teaches nothing that could be relied on; the use is reported instead.
+
+The honest hole: **a call is not tracked.** The checker sees what a test
+established and what an assignment removed, but not that a function assigned to a
+name, so
+
+```vela
+let x: number? = 1;
+if (x != null) {
+    clear(x);                  // a call — the checker does not know it assigns
+    print(tostring(x + 1));    // accepted, and wrong
+}
+```
+
+compiles. Assigning `x` directly is tracked; only the call is not. See
+[section 18](#18-design-rationale-and-known-gaps).
 
 ### The rules
 
@@ -589,7 +850,33 @@ unions, no generics, and no inference.
 `"n=" + 1` is an error, not `"n=1"`. `true + 1` is an error, not `2`.
 
 **Comparisons require matching types.** `1 == "0"` and `1 == true` are both
-errors. There is no cross-type equality.
+errors. There is no cross-type equality, and an array's element type is part of
+its type, so `number[] == string[]` is an error on the same grounds.
+
+**Array types are exact.** `number[]` is unrelated to `string[]` and to
+`number[][]`, with no subtyping and no widening. Because the element type is part
+of the type, one array per element type is enough: `fn f(xs: number[])` serves
+every `number[]` in the program, and a `string[]` argument is rejected rather than
+silently converted.
+
+**An array literal's type comes from context.** A nonempty literal infers from its
+first element, so `[1, 2]` is `number[]` and `["a"]` is `string[]`. An expected
+type wins over that inference, which is what lets a nested literal be written
+without repeating it: `let xs: number[][] = [[1], [2]];`. `[]` has nothing to infer
+from, so it needs a concrete array type from somewhere — a declaration's
+annotation, a `return`'s declared type, or a parameter — and with no context at all
+it is an error rather than a guess:
+
+```vela
+let xs: number[] = [];   // correct: the annotation supplies 'number[]'
+let ys = [];             // error anyway — the type annotation is mandatory
+print([]);               // error: nothing says what an empty array holds
+append([], "a");         // error: same reason
+```
+
+Every element of a literal must match the array's element type, and a nested
+literal must match the *element* type: `let xs: number[][] = [[1], ["a"]];` is
+reported at the second element.
 
 **Ordering comparisons require `number` operands.** `<`, `<=`, `>`, and `>=` are
 numeric-only; `"a" < "b"` and `true < false` do not compile. Only `==` and `!=`
@@ -666,15 +953,15 @@ It treats a **loop** as never returning, which is sound but incomplete — see
 
 ## 9. Built-ins
 
-There are exactly **thirteen callable built-ins** plus the `print` statement.
+There are exactly **twenty-three callable built-ins** plus the `print` statement.
 There is no module system, no import, and no other global name.
 
 | Name | Signature | Behaviour |
 | --- | --- | --- |
 | `tostring(x)` | `(any) -> string` | Renders using the same rules as `print`. Numbers never get a trailing `.0`. |
 | `tonumber(s)` | `(any) -> number` | `Number(s)` for a string. Returns `0` for a non-numeric string **and for any non-string argument**. Never fails. |
-| `typeOf(x)` | `(any) -> string` | Returns `"number"`, `"string"`, `"bool"`, `"void"`, `"function"`, or `"native"`. |
-| `len(s)` | `(string) -> number` | UTF-16 code-unit count. A `number` argument is a compile error. |
+| `typeOf(x)` | `(any) -> string` | Returns `"number"`, `"string"`, `"bool"`, `"void"`, `"array"`, `"function"`, or `"native"`. |
+| `len(s)` | `(string \| T[]) -> number` | UTF-16 code-unit count for a string, element count for an array. A `number` argument is a compile error. |
 | `trunc(x)` | `(number) -> number` | Toward zero, so `trunc(-2.7)` is `-2`. |
 | `floor(x)` | `(number) -> number` | Down, so `floor(-2.7)` is `-3`. |
 | `ceil(x)` | `(number) -> number` | Up, so `ceil(-2.7)` is `-2`. |
@@ -684,6 +971,34 @@ There is no module system, no import, and no other global name.
 | `max(a, b)` | `(number, number) -> number` | |
 | `idiv(a, b)` | `(number, number) -> number` | Truncates toward zero, like `%`. `idiv(17, 5)` is `3`; `idiv(-17, 5)` is `-3`. Dividing by zero gives `0`. |
 | `read()` | `() -> string` | One line of stdin, with the newline stripped. `""` at end of input. |
+| `upper(s)` | `(string) -> string` | Unicode upper case. The result can be longer: `upper("straße")` is `STRASSE`. |
+| `lower(s)` | `(string) -> string` | Unicode lower case. |
+| `trim(s)` | `(string) -> string` | Whitespace stripped from both ends. |
+| `startsWith(s, pre)` | `(string, string) -> bool` | **Subject first, then the prefix.** |
+| `endsWith(s, suf)` | `(string, string) -> bool` | **Subject first, then the suffix.** |
+| `indexOf(s, sub)` | `(string, string) -> number` | First index of `sub`, or `-1` when absent. An empty `sub` is at `0`. |
+| `substr(s, from, count)` | `(string, number, number) -> string` | Clamped: a start past the end or a negative count gives `""`, a negative start counts from the end, and a count running off the end stops. |
+| `repeat(s, n)` | `(string, number) -> string` | `n` copies. `n` of zero or less gives `""`; `n` is truncated, so `repeat("ab", 2.9)` is `abab`. |
+| `replace(s, from, to)` | `(string, string, string) -> string` | **First occurrence only.** Absent pattern or an empty `from` returns `s` unchanged. |
+| `append(xs, v)` | `(T[], T) -> T[]` | A **new** array with `v` on the end. `xs` is unchanged, so the caller reassigns. |
+
+### What the string built-ins guarantee
+
+Every one of the nine string functions is **total**: none of them can raise a
+runtime error, and none of them has a failure case to check for. That is a
+deliberate contrast with `s[i]`, which reports an out-of-range index, because a
+substring that runs off the end has an obvious answer while a missing element
+does not. The index expression stays strict so a typo is still caught; these are
+for building text, where clamping is what you want.
+
+The argument order is **subject first, pattern second** across the whole family —
+`startsWith(greeting, "hell")`, not `startsWith("hell", greeting)`. This is the
+reverse of the `startsWith(pre, s)` recipe these functions replaced, and it is
+the order that reads like the method calls they stand in for.
+
+`upper`/`lower` map by Unicode rather than by an ASCII table, which is why
+`upper("straße")` is `STRASSE`: the mapping is not one character to one
+character, so indexing into the result cannot assume one index is one letter.
 
 The numeric eight are specified rather than approximated, which is the point:
 `trunc` and `idiv` both go toward zero so they agree with `%`, and `round` breaks
@@ -710,6 +1025,30 @@ floating-point behaviour is the part that is hard to promise.
 Because strings come back unquoted, `tostring("1")` and `tostring(1)` both
 produce `"1"`. You cannot round-trip a string through `tostring` to recover its
 type — use `typeOf` for that.
+
+### `len` and `append` are not one signature each
+
+`len` accepts a `string` **or** an array, and `append(xs, v)` returns whatever
+array type it was given: `append([1], 2)` is `number[]`, `append(["a"], "b")` is
+`string[]`, and `append(xs, xs[0])` keeps `xs`'s own type. Two written signatures
+would each have to be declared twice, once per element type, which the language
+cannot express — there are no generics and no overload syntax. So the table
+carries a **check** and a **return** for these two rather than a signature, and
+the check is positional: the first argument has to be the right shape and the
+second is checked against the first argument's element type. That is the only
+place in the checker where a built-in's result type is computed rather than
+looked up; see [section 15](#the-single-source-of-truth-for-built-ins).
+
+```vela
+let xs: number[] = [1, 2];
+xs = append(xs, 3);          // correct
+let ys: string[] = append(xs, "a");   // error: 'xs[0]' is a 'number'
+let zs: number[] = append([], 1);     // error: nothing says what [] holds
+```
+
+`append` copies, so `append(xs, 1);` on its own line changes nothing at all. That
+is deliberate: the alternative was a mutating `push`, which would make the length
+of an array depend on how far a program got before a bug.
 
 ### `typeOf` can return `"native"`
 
@@ -800,7 +1139,7 @@ on it to catch a negative fraction.
 | --- | --- |
 | `+` | Concatenation. Both operands must be `string`. |
 | `==` `!=` | Value comparison, not identity. **These are the only comparisons that work on strings** — see below. |
-| `len(s)` | UTF-16 code-unit count: `len("hello")` is 5, `len("日本語")` is 3, an emoji is **2**. |
+| `len(s)` | UTF-16 code-unit count: `len("hello")` is 5, `len("日本語")` is 3, an emoji is **2**. `len(xs)` is an element count. |
 
 **Ordering comparisons do not work on strings.** `<`, `<=`, `>`, and `>=` require
 `number` operands, so `"abc" < "abd"` is a compile error:
@@ -821,32 +1160,95 @@ conversion. The only ordering available is `len(s)`, which is a number.
 
 ### Indexing
 
-`s[i]` is the only subscript in the language, and a `string` is the only thing it
-accepts. It reads one UTF-16 code unit and returns a one-code-unit `string`, so
-`len(s[i])` is `1` and the ordinary `string` rules still apply to it.
+`x[i]` is the only subscript in the language. A `string` yields one UTF-16 code
+unit as a one-code-unit `string`, so `len(s[i])` is `1` and the ordinary `string`
+rules still apply to it; a `T[]` yields a `T`.
 
 ```vela
 let s: string = "hello";
 print(s[0]);                    // h
 print(s[len(s) - 1]);           // o
 print(s[0] + "|" + s[1]);       // h|e
+
+let xs: number[] = [10, 20, 30];
+print(xs[1]);                   // 20
 ```
 
-Valid indices are `0` through `len(s) - 1`. Anything else, negative included, is a
-runtime error, not an empty string:
+Valid indices are `0` through `len(x) - 1`. Anything else, negative included, is a
+runtime error, not an empty answer:
 
 ```
-error: index 5 is out of range for a string of length 2
+error: index 5 is out of range: this string has length 2
+error: index 2 is out of range: this array has length 2
 ```
 
 A `number`, `bool`, or `void` cannot be indexed at all — the checker reports
-`this has type 'number' and cannot be indexed; only a 'string' can`, because a
-string is a sequence and there is no collection to subscript.
+`this has type 'number' and cannot be indexed; only a 'string' or an array can`,
+because neither has parts to read.
 
 `len` counts code units, so a surrogate pair occupies two indices. Reading half of
 an emoji gives a broken character, and there is no code-point iteration to offer
 instead. There is still no case conversion, because characters can be read and
 compared but not mapped to new ones.
+
+### Arrays
+
+| Operation | Semantics |
+| --- | --- |
+| `xs[i]` | A `T`. Reads one element. |
+| `xs[i] = v` | Replaces one element. The array's length does not change. |
+| `xs[i] += v` | Sugar for `xs[i] = xs[i] + v`, with the ordinary type rules. |
+| `len(xs)` | Element count. |
+| `==` `!=` | **Reference** comparison, not contents. |
+| `append(xs, v)` | A new array of the same type, with `v` on the end. |
+
+**An array is a reference, so two names can share one array.** That is what makes
+a write visible through both names, and it is why sorting an array in place works
+at all — the recipe in [section 11](#arrays) returns the same array it was given.
+
+```vela
+let xs: number[] = [1, 2];
+let ys: number[] = xs;
+xs[0] = 99;
+print(ys[0]);      // 99: one array under two names
+print(xs == ys);   // true
+print(xs == [99, 2]);   // false: a different array, contents or not
+```
+
+So `==` on arrays answers "are these the same array?", and it is not a way to
+compare contents. `[1, 2] == [1, 2]` is false for two separate literals.
+
+**A write past the end is an error, not an append.** The length is fixed when the
+array is built, so there is no form of assignment that grows one:
+
+```
+error: index 2 is out of range: this array has length 2
+```
+
+`append` is the only way to make an array longer, and it **copies** into a new one.
+The caller reassigns, or the result is discarded:
+
+```vela
+let xs: number[] = [1];
+append(xs, 2);       // correct, and does nothing: the new array is thrown away
+xs = append(xs, 2);  // this is the one that grows it
+```
+
+The cost is a copy per step, so a loop that appends in a hot path is slower than a
+program with one array the right size. That is the trade for making the length
+depend on nothing but how the array was built, which is what lets `xs[i]` mean the
+same element on every iteration of every loop.
+
+**A `const` array is still writable through its elements.** `const` is a rule about
+the *name*, and it applies to the name only:
+
+```vela
+const xs: number[] = [1, 2];
+xs = append(xs, 3);   // error: 'xs' is declared with 'const' and cannot be assigned to
+xs[0] = 9;            // correct: what the array holds is not the name
+```
+
+A `const` is not deep immutability, and holding one is never an aliasing bug.
 
 ### Booleans
 
@@ -920,15 +1322,14 @@ would otherwise reach for. **All of the code below compiles and runs on the
 current implementation**, with the output shown.
 
 > **Do not redefine the built-ins.** A top-level `fn trunc`, `fn floor`, `fn abs`,
-> `fn min`, `fn idiv`, or `fn read` is a compile error — the same rule that stops
-> you shadowing `tostring` at the top level. The eight numeric built-ins and
-> `read` are in [section 9](#9-built-ins); they are not repeated below.
+> `fn min`, `fn idiv`, `fn read`, `fn upper`, `fn append`, or `fn substring` is a
+> compile error — the same rule that stops you shadowing `tostring` at the top
+> level. The twenty-three built-ins are in [section 9](#9-built-ins); they are not
+> repeated below.
 >
 > **Read the recipes in order.** They build on each other: `sqrt` and `powInt`
-> come first because `digits` and `group` call them, and `reverse`,
-> `startsWith`, and `substring` are the string primitives the last two use.
-> Each snippet is shown in isolation, so copy the whole section in sequence
-> rather than a single block.
+> come first because `digits` and `group` call them. Each snippet is shown in
+> isolation, so copy the whole section in sequence rather than a single block.
 
 ### Integer exponentiation
 
@@ -1062,9 +1463,9 @@ group(100)        -> 100
 
 ### Looking inside a string
 
-`s[i]` returns a one-code-unit `string`, so everything per-character is now a
-loop with `+`. Reversal prepends, a search compares, and a substring is a slice
-assembled one unit at a time.
+`s[i]` returns a one-code-unit `string`, so per-character work is a loop with
+`+`. Reversal prepends, and it is the one string primitive still worth writing
+by hand; the rest are [built in](#9-built-ins).
 
 ```vela
 fn reverse(s: string): string {
@@ -1072,57 +1473,30 @@ fn reverse(s: string): string {
     for (let i: number = 0; i < len(s); i = i + 1) { out = s[i] + out; }
     return out;
 }
-
-fn startsWith(pre: string, s: string): bool {
-    if (len(pre) > len(s)) { return false; }
-    for (let i: number = 0; i < len(pre); i = i + 1) {
-        if (pre[i] != s[i]) { return false; }
-    }
-    return true;
-}
-
-fn indexOf(needle: string, s: string): number {
-    if (len(needle) > len(s)) { return 0 - 1; }   // sentinel: not found
-    for (let i: number = 0; i + len(needle) <= len(s); i = i + 1) {
-        if (startsWith(needle, substring(s, i, len(needle)))) { return i; }
-    }
-    return 0 - 1;
-}
-
-fn substring(s: string, from: number, count: number): string {
-    let out: string = "";
-    for (let i: number = from; i < from + count; i = i + 1) { out = out + s[i]; }
-    return out;
-}
 ```
 
-`substring` comes last on purpose — the other two call it, and forward references
-work now, so the order is a reading convenience rather than a requirement.
-`indexOf` returns `-1` when there is no match, because there is no `null` to
-return.
+```
+reverse("abc") -> cba
+```
 
-```
-reverse("abc")            -> cba
-startsWith("hell", "hello")-> true
-substring("hello", 1, 3)  -> ell
-indexOf("ll", "hello")    -> 2
-indexOf("z", "hello")     -> -1
-```
+The reason reversal is not built in while `startsWith` is: reversal has no
+sentinel and no clamping decision, so a loop is the whole answer. Search and
+slicing have to decide what "not found" and "past the end" mean, which is exactly
+the judgement a built-in should make once rather than every reader re-making.
+
+`indexOf` returns `-1` when there is no match, because the result is a `number` and
+`null` would not fit in one. The built-in keeps that sentinel, and answers `-1` for
+an absent pattern and `0` for an empty one.
 
 ### String padding and repetition
 
 Accumulating in a loop is the *only* way to build a string of a computed length.
+`repeat` is built in, so only a padding rule is left to write.
 
 ```vela
 fn pad(s: string, width: number): string {
     let out: string = s;
     while (len(out) < width) { out = " " + out; }
-    return out;
-}
-
-fn repeat(s: string, times: number): string {
-    let out: string = "";
-    for (let i: number = 0; i < times; i = i + 1) { out = out + s; }
     return out;
 }
 ```
@@ -1208,24 +1582,95 @@ fn isEven(n: number): bool { return n % 2 == 0; }
 fn isOdd(n: number): bool { return isEven(n) == false; }   // mutual, no forward decl
 ```
 
+### Arrays
+
+There is no `for ... of`, no `map`/`filter`/`reduce`, and nothing that grows an
+array in place, so array work is a loop over indexes. Three operations cover
+almost everything.
+
+```vela
+// Build one whose length is only known while running. `append` copies, so the
+// assignment is the point: without it the loop would go nowhere.
+fn squares(limit: number): number[] {
+    let out: number[] = [];
+    for (let n: number = 1; n <= limit; n = n + 1) { out = append(out, n * n); }
+    return out;
+}
+
+// Visit. `xs` is a reference, so this sorts in place and returns the same array.
+fn sort(xs: number[]): number[] {
+    for (let i: number = 0; i < len(xs) - 1; i = i + 1) {
+        for (let j: number = 0; j < len(xs) - 1 - i; j = j + 1) {
+            if (xs[j] > xs[j + 1]) {
+                let swap: number = xs[j];
+                xs[j] = xs[j + 1];
+                xs[j + 1] = swap;
+            }
+        }
+    }
+    return xs;
+}
+
+// Search. `-1` is the sentinel: the result is a `number`, so it cannot be `null`.
+fn find(xs: number[], needle: number): number {
+    for (let i: number = 0; i < len(xs); i = i + 1) {
+        if (xs[i] == needle) { return i; }
+    }
+    return 0 - 1;
+}
+
+fn sum(xs: number[]): number {
+    let total: number = 0;
+    for (let i: number = 0; i < len(xs); i = i + 1) { total = total + xs[i]; }
+    return total;
+}
+```
+
+`sort` is **in place** and legal because an array is a reference: `sort(xs)` and
+`print(xs)` see the same array. It returns the array only so the call can be
+chained — the print below shows one side, so the return earns its place.
+
+```vela
+fn show(xs: number[]): void { print(xs); }
+
+show(sort([3, 1, 2]));   // [1, 2, 3]
+```
+
+A `number[][]` needs no parentheses, because the brackets bind to the element
+type. This is a grid read one row at a time:
+
+```vela
+let board: number[][] = [[1, 2], [3, 4]];
+print(board[1][0]);   // 3 — board[1] is a number[], so this reads its first element
+print(len(board));    // 2 rows
+```
+
+That inner row is itself an array and an alias, so `board[1][0] = 9` writes
+through two levels to the one cell, while `board[1] = [9, 9]` replaces the whole
+row instead.
+
 ### Things you genuinely cannot write
 
 Do not attempt these; they are impossible, not merely verbose.
 
-- Case conversion. Characters can be read and compared but not mapped to new
-  ones, so there is no `upper` or `lower` to write. `for` over the ASCII
-  letters with an `if` per character is a 52-branch table, not a function.
-- Anything over a list of values — needs a collection type. A string is a
-  sequence, not a container.
+- A list of mixed types, or a list of records. `T[]` is one element type, so an
+  array of things that differ has no representation; `number[][]` and parallel
+  arrays get you further, not further than that.
+- Anything that needs an array to grow while it is being read at the same length,
+  or a sparse or negatively-indexed one. Length is fixed at construction, there
+  are no holes, and index `-1` is the last element written the C way — a runtime
+  error, not a feature.
 - Dispatch tables and function composition. A `function` value holds no
   signature, so there is nothing to build a table out of and nothing to inspect.
 - Try/catch, error propagation, exception types. Validate up front and return a
   documented sentinel: `-1` for "not found", `0` for "division by zero".
 - File, network, time, or randomness access. `print` and `read` are the only I/O.
 
-The workaround pattern for all of them is the same: **flatten the data into
-`number`s and loop.** Encode a set of records as a base-256 integer, or write one
-function per case and branch on a tag.
+The workaround pattern for most of them is the same: **flatten the data into
+`number`s and loop,** or encode it as a base-256 integer and decode with `% 256`
+and `idiv(x, 256)`. A set of records fits in `number[][]` when every record has
+the same fields, and otherwise goes in a base-256 integer, one function per case,
+or a tag you branch on.
 
 ---
 
@@ -1272,7 +1717,10 @@ Structural: `expected X, found Y` and the specific forms below.
 | Message | Cause |
 | --- | --- |
 | `expected ':' followed by a type` | `let x = 1;` — missing type annotation |
-| `expected a type name (number, string, bool, or void), found X` | Invalid type keyword |
+| `expected a type name, found X` | An unknown or misplaced type. The notes list the five type keywords and the signature form |
+| `expected '(' to start the parameter types` | `let f: fn = g;` — `fn` alone is the declaration keyword, not a type |
+| `expected ')' to close the parameter list` | Trailing or missing `,` in a signature |
+| `expected '->' followed by a return type` | `fn(number) number` — a signature needs its arrow |
 | `expected '=' followed by an initial value` | `let x: number;` |
 | `expected a variable name` / `a function name` / `a parameter name` | Bad identifier position |
 | `expected '(' to start the parameter list` | Malformed `fn` header |
@@ -1290,10 +1738,28 @@ Structural: `expected X, found Y` and the specific forms below.
 | `the left-hand side of '=' must be a variable` | Assignment to a non-identifier |
 | `'return' is only allowed inside a function` | Top-level `return` |
 | `'break' / 'continue' is only allowed inside a loop` | Loop control outside a loop |
+| `required field 'b' cannot follow an optional one` | An optional field is not last. Reported once per struct, at the first field that breaks the order. Notes: `a constructor takes one argument per field, in order, so leaving one out leaves out everything after it` and `move the optional fields to the end of the list` |
+| `field 'x' is already nullable, so '?' changes nothing` | `x?: number?`. Notes: `write either 'next?: Node' or 'next: Node?', not both` and `the first may be left out of the constructor; the second must be given one` |
+| `a field cannot be optional and have type 'void'` | `y?: void` |
 | `unexpected X at the top level` | Stray token |
 
 Every structural error carries the note `every declaration in Vela needs an
 explicit type` where a type is what is missing.
+
+### Nullable diagnostics
+
+| Message | Cause |
+| --- | --- |
+| `a type cannot be a nullable 'void'` | `void?` or `void?[]`. There is no value for absence to be absent from. |
+| `this type is already nullable, so another '?' changes nothing` | `number??` or `number?[]??`. |
+| `cannot compare 'number' with 'string?' using '=='` | A non-nullable against a nullable of another type. Two nullables must agree on their inner type. |
+| `this has type 'Node?' and has no fields` | A field read through a nullable that has not been narrowed. Note: `test it first: 'if (x != null) { ... }' narrows it for the rest of that branch`. |
+| `argument 1 has type 'number?', which 'len' does not accept` | A built-in that does not take a nullable. The same note as above, so the test that fixes it is named. |
+| `cannot initialise 'x' of type 'number' with a value of type 'number?'` | Narrowing back out of a nullable. Note: `'number?' may be absent, so it is not a 'number' until a test has proved it is there`. |
+| `cannot initialise 'x' of type 'number' with a value of type 'null'` | `null` where a non-nullable is expected. Note: `annotate the target as 'number?' rather than 'number', or store a real value instead`. |
+| `'A' cannot contain itself` | A struct cycle with no nullable edge to break it. Note names the field that closes the cycle and prints the way round. Reported once per cycle; uses of such a struct then pass in silence. |
+| `expected at least 1 argument but got 0` | A struct with optional fields called with too few. The note is the fix: it prints the constructor's signature and names the fields that may be left out. |
+| `expected at most 3 arguments but got 4` | The same constructor called with too many. |
 
 ### Type errors
 
@@ -1495,7 +1961,56 @@ $ vela run examples/linecount.vela < examples/linecount.input
 
 The summary is held in five `number`s and no string is ever stored, because a
 summary never needs the values themselves. That turns out to be the natural way
-to write it: with no collections, the accumulation *is* the algorithm.
+to write it: with no array of lines to walk, the accumulation *is* the algorithm.
+
+### arrays.vela — the whole array surface
+
+`examples/arrays.vela` is the one program to read for arrays, because every rule
+about them shows up somewhere in it: literals, `len`, reading and writing one
+element, aliasing, reference equality, sorting in place, building a new array with
+`append`, and a `number[][]` read and written one cell at a time.
+
+```
+literal:    [5, 3, 8, 1]
+length:     4
+...
+row 1:      [4, 5, 6]
+cell:       5
+changed:    [[1, 2, 3], [4, 0, 6], [7, 8, 9]]
+```
+
+Two lines in it are worth quoting for what they prove. `alias[3] = 42;` changes
+`xs`, because an array is a reference, and then `xs == [100, 10, 8, 42]` is
+`false` — the contents match exactly and the answer is still no, because the
+literal is a different array. And `append(empty, 1)` is `[1]`, which is the only
+way an empty array ever grows.
+
+### nullable.vela — absence, and the test that settles it
+
+`examples/nullable.vela` is the one program to read for nullable types, because each
+rule shows up somewhere in it: a value and an absence in the same declaration, a
+guard clause that narrows by leaving, a `while` that walks a nullable field one step
+at a time, an array of nullable elements beside a nullable array, and `typeOf` on
+both kinds.
+
+```
+absent
+present: 6
+h
+-
+chain: 7
+elements: 3
+first:    false
+no array at all
+type:    null
+string?: string
+```
+
+The `sum` function is the reason the feature exists. `next: Node?` is what makes a
+struct refer to itself — every field has to be given a value at construction, so a
+plain `next: Node` could never be built — and `while (at != null) { … at = at.next }`
+needs no test inside the loop, because a loop body is checked as though its
+condition held.
 
 ### Nested declarations
 
@@ -1725,16 +2240,24 @@ a silent gap.
 | --- | --- | --- | --- |
 | `program` | `program` | `numberLiteral` | `numberLiteral` |
 | `letDecl` | `letDecl` | `stringLiteral` | `stringLiteral` |
-| `fnDecl` | `fnDecl` | `booleanLiteral` | `booleanLiteral` |
-| `block` | `block` | `variable` | `variable` |
-| `if` | `ifStmt` | `unary` | `unary` |
-| `while` | `whileStmt` | `binary` | `binary` |
-| `for` | `forStmt` | `logical` | `logical` |
-| `return` | `returnStmt` | `assignment` | `assignment` |
-| `break` | `breakStmt` | `call` | `call` |
-| `continue` | `continueStmt` | | |
-| `print` | `printStmt` | | |
-| `expressionStmt` | `expressionStmt` | | |
+| `constDecl` | `constDecl` | `booleanLiteral` | `booleanLiteral` |
+| `fnDecl` | `fnDecl` | `nullLiteral` | `nullLiteral` |
+| `structDecl` | `structDecl` | `variable` | `variable` |
+| `structField` | `structField` | `unary` | `unary` |
+| `block` | `block` | `binary` | `binary` |
+| `if` | `ifStmt` | `logical` | `logical` |
+| `while` | `whileStmt` | `assignment` | `assignment` |
+| `for` | `forStmt` | `call` | `call` |
+| `return` | `returnStmt` | `index` | `index` |
+| `break` | `breakStmt` | `fieldAccess` | `fieldAccess` |
+| `continue` | `continueStmt` | `fieldAssign` | `fieldAssign` |
+| `print` | `printStmt` | `indexAssign` | `indexAssign` |
+| `expressionStmt` | `expressionStmt` | `arrayLiteral` | `arrayLiteral` |
+
+The `kind`s for *types* — `number`, `string`, `bool`, `void`, `function`, `signature`,
+`array`, `structType`, `nullable` — appear in an annotation, never in an
+expression, so they have no visitor method; `resolveAnnotation` in the checker is
+the one reader, and the parser is their only producer.
 
 ### The parser
 
@@ -1751,9 +2274,23 @@ makes every binary operator left-associative. Assignment is recognised separatel
 from the token stream and is right-associative. Call suffixes are applied in
 `parsePrefix`, so they bind tighter than every operator.
 
+**Indexed assignment is the one place the two halves of expression parsing have to
+agree.** An `xs[i] = v` and an `xs[i] + 1` share their first three tokens, and the
+subscript must only be read once, so the parser cannot parse an expression and
+then check what it got. It looks ahead instead: a name followed by `[` is read as
+an index target, and *what follows the closing bracket decides what it was* — an
+assignment operator means this was a target, anything else means the same
+`IndexExpression` is the left operand of the rest of the expression, built by
+`parseBinaryRest` on the node already in hand. `xs[0] + 1` therefore parses
+through exactly the same code path as before the feature existed, and no
+expression is ever constructed twice. A chain is a target when its **last** suffix
+is an index, which is what makes `grid[0][1] = 9` legal and `f()[0] = 1` not.
+
 Error recovery uses `synchronize()`, which skips to the next `;`, to a
 declaration or statement start token, or to a `}`. `parseProgram` forces progress
-so hostile input terminates rather than looping.
+so hostile input terminates rather than looping. An unclosed `number[` synthesises
+its `]` and moves on, so one missing bracket does not bury the rest of the file in
+type errors.
 
 ### The checker
 
@@ -1763,20 +2300,62 @@ Type checking is a visitor over the same AST. Assignability is plain structural
 equality plus poison propagation:
 
 ```ts
-isAssignable(target, value)  // true if either side is "error" or "any", else typesEqual
+isAssignable(target, value)  // error/any poison, then nullable widening, then typesEqual
 ```
+
+The nullable rules are the only widening in the language: a plain `T` assigns into
+a `T?`, `null` assigns into a `T?`, and `T?` into `U?` exactly when `T` assigns
+into `U`. Nothing absorbs a nullable *value* into a plain target, which is what
+keeps `x + 1` on a possibly-absent `x` a compile error rather than a runtime
+surprise.
 
 `ErrorType` is a poison value: once an expression has an error, every downstream
 use is accepted silently, so one mistake produces one diagnostic instead of a
 cascade.
 
+**The checker holds one piece of context at a time:** the type an expression is
+*required* to have. Almost every expression's type follows from itself — `1 + 2` is
+a `number` whatever the declaration around it says — and threading an expected type
+through every visitor method for the sake of the one node that needs it would be
+noise. An array literal is the exception, because its element type appears
+nowhere inside it, so `visitExpecting` sets a field, the literal reads it, and the
+field is restored afterwards.
+
 Unknown names get a `did you mean` suggestion computed with **Levenshtein edit
 distance** over the names in scope.
 
+**Struct resolution is two passes, and the second is a cycle search.** A field
+annotation names a struct, so a first pass gives every declaration its nominal
+type and a second pass resolves the fields. That is also where a cycle is found:
+`structReachedBy` walks each field's type for a target struct, following struct and
+array edges and *stopping at a nullable*, which is why `next: Node?` terminates the
+walk and `next: Node` does not — an optional field is nullable, so `next?: Node`
+terminates it for the same reason. A cycle is reported once, at the field that closes
+it, with the route printed (`'A.b' -> 'B.a'`), and the struct is marked
+unbuildable so its uses pass in silence instead of repeating the complaint.
+
+**Narrowing is a map of facts, and the map is copied rather than mutated.** A fact
+is a `Symbol`, a path from it, and the type proved there — so it is keyed on the
+binding, not the name, and a shadowing `let` cannot overwrite an outer fact.
+`nullTest` reads a comparison and `placeOf` reads a place, which is what lets a
+field chain (`p.next.next`) narrow as one path. `withFacts` takes a fact list,
+checks an expression under it, and returns the map to use *after*; the four
+branching sites are `if`/`else`, a loop condition with its body, the right operand
+of `&&`, and a `for` update with its body. An assignment calls `forget` on the
+place it writes, and a block saves and restores the map so a fact cannot escape its
+branch.
+
 ### The runtime
 
-Values are a tagged union: `number`, `string`, `bool`, `void`, `function`
-(closure), `native` (built-in). `void` is a singleton `VOID` value.
+Values are a tagged union: `number`, `string`, `bool`, `null`, `void`, `array`,
+`struct`, `function` (closure), `native` (built-in). `void` is a singleton `VOID`
+value and `null` a singleton `NULL` one, which is what makes `==` between two of
+them a value comparison rather than a reference one.
+
+An `array` value is a mutable box around a `Value[]`, not a value of that element
+type. That is what gives `xs` and `ys = xs` one shared array, so a write through
+either name is seen by the other, and what makes `xs == ys` a reference question
+rather than a contents one.
 
 `Environment` has two deliberately distinct operations, and conflating them is
 the classic hand-written-interpreter bug:
@@ -1797,6 +2376,21 @@ difference between running a program and testing it.
 parameter types, return type, and behaviour. The runtime builds `NativeValue`s
 from it; the checker seeds its root scope from the same table. **They cannot
 drift.**
+
+Two entries do not fit a signature, and both say so with a function instead:
+
+- `accepts(type, position, argTypes)` replaces the parameter type at a position the
+  declared `any` cannot. `len` accepts a string or an array, and `append`'s second
+  argument has to match the first argument's *element* type — a relation one
+  argument's own type cannot express. Passing every argument type along is what
+  makes the second one checkable.
+- `returns(argTypes)` computes the result type, so `append` returns whatever array
+  type it was given rather than one fixed one.
+
+The checker keys its specs on the **seeded symbol**, not the name, and looks the
+callee up before applying them. A shadowing `let append: function` in a block is
+an ordinary user function that shares a spelling, and keying on the name would
+reject its calls for a rule about an array.
 
 ---
 
@@ -1842,6 +2436,28 @@ changes, and an update to every operator's type rules. Nothing in the
 architecture is extensible along this axis, which is a large part of why the type
 list is four items long. Prefer expressing the new concept as a function over
 existing primitives.
+
+### Adding a type constructor
+
+Cheaper than a new primitive, because the representation is shared — this is how
+`T[]`, `fn(...) -> R`, `struct`, and `T?` were each added. The work is:
+
+1. `src/types/types.ts`: a `Type` variant, a constructor, `isAssignable` for it, and
+   a case in `typeToString`. `nullableType` is deliberately idempotent, so `number??`
+   collapses rather than nesting.
+2. The AST and the parser: a suffix in `src/parser/parser.ts`, so `T[]`, `T?`, and
+   `fn(...) -> R` compose in one left-to-right pass. Reject what cannot exist
+   (`void?`, a second `?`) at parse time, with a note naming the legal form.
+3. Every place that *asks* about a type rather than constructs one — the operator
+   rules, `==` compatibility, `isTruthy`, the built-in specs, assignment, and
+   return checking. `comparableForEquality` is the clearest example: it handles
+   `null` before it handles kinds, because `x == null` has to be writable for any
+   expression.
+4. The runtime: a `Value` variant and a case in the interpreter and `displayValue`.
+5. Narrowing, if the type can hold an absence: `nullTest`, `placeOf`, `splitPath`,
+   and `forget` in `src/types/checker.ts`, and `withFacts` at the four sites that
+   branch — `if`/`else`, a loop condition and body, a `&&` right operand, and a
+   `for` update.
 
 ### Conventions to follow
 
@@ -1934,17 +2550,116 @@ body, and the only names that appear early are the ones whose signatures are
 already known. Variables are not hoisted, because a variable's type comes from a
 value that has to be computed first.
 
-**Function values, and what the bare `function` type gives up.** The bare type is
-the one place where the "fully describe it" rule is knowingly bent. `function`
-records *that* a function is stored but not which signature, so a call through one
-is unchecked: no arity check at compile time, and no known result type. The
-alternative was a written signature type such as `(number) -> number`, which would
-check both but would mean a function is storable under only one exact signature —
-so passing `double` to something expecting `fn(string) -> number` could not be
-expressed at all, and callbacks would need a type per shape. The bare type trades
-precision at the call site for the ability to pass a function around at all. A
-call that gets the arity wrong still fails at runtime, with a message naming the
-function that was actually called.
+**Nullable types and flow narrowing — the one place soundness is bent on
+purpose.** `T?` is fully describable and so is unremarkable; what is worth
+recording is that the `if` that settles it needs the *checker* to remember what a
+test proved. It does: a comparison against `null` records a fact about a place, per
+branch, and a fact is keyed on the **symbol** rather than the name, so a shadowing
+`let x` is a different fact from an outer `x` rather than an accidental
+overwrite of it. Writing to a place removes its fact, and the places that can be
+narrowed are a name and a chain of fields from one.
+
+Two things are deliberately not done. An **indexed element is not narrowed**,
+because `xs[0]` has no fixed identity — `i` may be something else by the time it is
+read again, and two syntactically identical `xs[i]` need not be the same element.
+Narrowing it would be unsound in a way a reader could not see. And a **function
+call does not invalidate anything**: the checker tracks what a test established and
+what an assignment removed, and it cannot see into a call that assigns.
+
+```vela
+let x: number? = 1;
+if (x != null) {
+    clear(x);                 // a call — the checker does not know it assigns
+    print(tostring(x + 1));   // accepted, and wrong
+}
+```
+
+This is the one hole in the feature, and it is the same shape as the bare
+`function` type's unchecked call: a limited, documented unsoundness bought in
+exchange for a feature that is otherwise unusable without a cast. It is also
+narrower than it looks — an explicit `x = null` is seen, and so is writing to a
+field or an element — and it is the *absence* of the hole that would cost more,
+since the alternative is refusing `x + 1` after a test the programmer can plainly
+see has proved it.
+
+**Function values: two ways to name one.** A function can be stored, passed, and
+returned, and there are two types for that. A written signature,
+`fn(number) -> number`, names the parameters and the return type, so a call
+through it has its arity, its arguments, and its result all checked. The bare
+`function` records *that* a function is stored and nothing more, so a call
+through one is unchecked: no arity check at compile time, and no known result
+type.
+
+```vela
+fn double(x: number): number { return x * 2; }
+
+let f: fn(number) -> number = double;   // checked on every call
+let n: number = f(21);                  // 42, and 'n' is really a number
+let g: function = double;               // stored, but not checked when called
+let m: number = g(1, 2, 3);             // compiles; fails at runtime
+```
+
+The bare type is the one place where the "fully describe it" rule is knowingly
+bent. Its value is that a function is storable without committing to one shape,
+which is what a variable that gets swapped between different operations needs. The
+cost is that a call through it cannot be verified, and its result is `any`, so
+`tostring` is often needed around one. A call that gets the arity wrong still
+fails at runtime, with a message naming the function that was actually called.
+
+**Optional struct fields — describable, with one rule borrowed from the call.** A
+field whose type is `T?` is fully described by the type system, and it was already
+possible. What `field?: T` adds is that the *constructor* may leave it out, and
+that is a fact about argument lists rather than about types. It was worth adding
+because the alternative is a nullable field that every construction has to spell
+out — `Node(1, null)` — and because an optional field is the natural way to write a
+recursive struct now that `Node(1)` means "no next node" without a sentinel.
+
+Two decisions follow from the arguments being positional. An omitted field is
+stored as `null` rather than as some separate "absent" state, so there is one
+value per field, one comparison story, and no third thing to print. And the
+optional fields must be a **suffix**, because `Config(3)` fills the first field and
+there is no spelling that fills the third and skips the second; supporting the gap
+would mean named arguments. The arity check is therefore a *range* rather than a
+single count, and its diagnostic prints the constructor's signature and names the
+fields that may be left out, which is the note that turns an arity complaint into
+the fix.
+
+**The two types are not interchangeable.** A concrete signature assigns to the
+bare `function`, but a bare `function` does not satisfy a signature:
+
+```vela
+fn d(x: number): number { return x; }
+let b: function = d;                    // correct: a signature widens to 'function'
+let f: fn(number) -> number = b;        // error: 'function' is not fn(number) -> number
+```
+
+Accepting it would claim knowledge of parameters the type does not have, and then
+the call would be checked against a signature that was never stated. For the same
+reason a signature must match exactly: there is no subtyping, so a
+two-parameter function is not a `fn(number) -> number`, and `fn(number) -> number`
+is not a `fn(number) -> string`. That strictness is what makes the call sites
+trustworthy.
+
+Parameter *names* may be written in a signature and are ignored, because a name is
+not part of a type. `fn(n: number) -> number` and `fn(number) -> number` are the
+same type, which keeps a signature visually parallel to a `fn` declaration:
+
+```vela
+fn apply(op: fn(number) -> number, v: number): number { return op(v); }
+let named: fn(x: number) -> number = double;   // the 'x' is documentation
+```
+
+Signatures nest, so a function that takes a function is written without any
+special syntax beyond the nesting:
+
+```vela
+fn twice(f: fn(number) -> number, v: number): number { return f(f(v)); }
+```
+
+The one thing a signature cannot express is a function of *several* shapes at
+once. `map` over a list of mixed arities has no spelling here, because there are
+no generics and no subtyping; the answer is the bare `function` type and an
+unchecked call, or a function per shape.
 
 The remaining restrictions still stand on the original rule:
 
@@ -1952,11 +2667,11 @@ The remaining restrictions still stand on the original rule:
   element type, so there is no way to declare a list of `number` and index it.
   Data that varies in length has to be flattened into named `number` variables, or
   processed a value at a time.
-- **No `sqrt`, `pow`, or a string library.** `s.upper()`, `s.split()`, and
-  `s.replace()` need a character-to-character mapping, and reading a character is
-  not the same as being able to produce one. With `s[i]` there is now a way to
-  *read* every character, but still no way to *map* it, so a substitution table
-  would be a chain of `if` statements over every character you care about.
+- **No `sqrt` or `pow`.** The eight numeric built-ins cover rounding and integer
+  division, which is the part worth promising exactly; the other two are written
+  out of `trunc` in [section 11](#11-standard-library-recipes). Case conversion,
+  trimming, search, slicing, repetition, and replacement *are* built in — see
+  [section 9](#9-built-ins) — so there is no string-library gap left.
 
 ### Known limitations
 
@@ -1983,6 +2698,34 @@ fn f(n: number): number {
 Being wrong in the safe direction is the right trade for a first version, and it
 is the most significant known gap in the checker.
 
+**Narrowing is not invalidated by a call.** The checker knows what a test proved and
+what an assignment removed, but not that a called function assigned to a name, so
+this compiles and can fail at runtime:
+
+```vela
+let x: number? = 1;
+if (x != null) {
+    clear(x);                 // not tracked
+    print(tostring(x + 1));   // accepted, and x may be null here
+}
+```
+
+An explicit `x = null`, or a write to `x` or to one of its fields, *is* tracked, and
+so is entering a function or leaving a block. Assigning the value explicitly is the
+fix, and it is one line. See
+[section 18](#18-design-rationale-and-known-gaps) for why the feature is worth the
+hole.
+
+**An indexed element is not narrowed.** `if (xs[0] != null) { xs[0] + 1 }` is
+rejected: an index is a place with no fixed identity, so nothing could invalidate
+the fact or keep it honest. Copy it into a named variable to use it twice.
+
+**A struct cycle is reported once, at the declaration,** and every use of such a
+struct then passes in silence — including a constructor call with the wrong arity.
+A reader fixing the declaration gets one error to fix rather than the same
+complaint at every use, at the cost of a second error appearing once the first is
+resolved.
+
 **The REPL's multi-line heuristic is not part of the language.** It reads balanced
 brackets and trailing operators, so a `while` body is legal on one REPL line just
 as it is across several in a file.
@@ -2004,9 +2747,10 @@ limit is a number that would change with the runtime rather than the language.
 
 ### Not in this version
 
-Arrays and collections · user-defined types, generics, modules · a writable
-function type · bytecode compilation · `sqrt` and `pow` · ordering on `string`
-and `bool` · code-point iteration.
+Generics · modules · optional *parameters* · default field values · named
+arguments · a writable function type · bytecode compilation · `sqrt` and `pow` ·
+ordering on `string` and `bool` · ordering or `Option` on a nullable · code-point
+iteration · intersection narrowing for an indexed element.
 
 ---
 
@@ -2029,7 +2773,16 @@ Before calling a `.vela` program correct, verify each of these:
 - [ ] Every number meeting a string goes through `tostring`.
 - [ ] Every string meeting a number goes through `tonumber`.
 - [ ] Every binary `+` has two operands of the **same** type.
-- [ ] Every comparison has two operands of the **same** type.
+- [ ] Every comparison has two operands of the **same** type. `null` is the
+      exception: it compares against anything, and a value that cannot be absent
+      is always `!= ` it.
+- [ ] Every `T?` is tested against `null` before its value is read — a field
+      chain included — and no indexed element is being narrowed, because it is not
+      narrowed.
+- [ ] Every field of a `struct` can actually be given a value; a recursive one
+      needs the `?`, or the declaration does not build.
+- [ ] Every `?` on a struct field is **after the name** (`label?: string`), and
+      every optional field is after every required one.
 - [ ] Every variable is declared before it is used. Functions are exempt —
       signatures are hoisted, so a forward or mutual call is fine.
 - [ ] Every non-`void` function ends with a `return` that the checker will

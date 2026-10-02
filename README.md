@@ -100,15 +100,55 @@ for (let i: number = 1; i <= 20; i = i + 1) {
 }
 ```
 
-There are four primitive types — `number`, `string`, `bool`, and `void` — plus
-the bare `function` type. There are no collections, no modules, no classes, and
-no user-defined types. That is a deliberate constraint: the point is to keep the
-pipeline legible, and every one of those features is a chapter's worth of design
-on its own.
+There are four primitive types — `number`, `string`, `bool`, and `void` — plus the
+bare `function` type, fixed-length arrays written `T[]`, a nullable written `T?`
+with `null` as its absence, and one user-defined type, the `struct`. There are no
+modules, no classes, and no unions. That is a deliberate constraint: the point is
+to keep the pipeline legible, and every one of those features is a chapter's worth
+of design on its own.
 
-Four things that used to be impossible are not any more: `s[i]` indexes a string,
-`trunc`/`floor`/`ceil`/`round`/`abs`/`min`/`max`/`idiv` are built in, functions can
-be stored and passed as `function` values, and forward and mutual recursion work.
+```vela
+let xs: number[] = [3, 1, 2];
+let i: number = 0;
+while (i < len(xs) - 1) {              // no for ... of, no sort
+    if (xs[i] > xs[i + 1]) {
+        let swap: number = xs[i];      // an array is a reference, so this works
+        xs[i] = xs[i + 1];
+        xs[i + 1] = swap;
+    }
+    i = i + 1;
+}
+print(xs);                             // [1, 2, 3]
+```
+
+```vela
+struct Node { value: number; next: Node?; }   // a nullable field breaks the cycle
+
+fn sum(head: Node?): number {
+    let total: number = 0;
+    for (let at: Node? = head; at != null; at = at.next) {
+        total = total + at.value;               // `at` is a `Node` here, not an error
+    }
+    return total;
+}
+print(sum(Node(1, Node(2, null))));             // 3
+```
+
+```vela
+struct Config { retries: number; label?: string; }   // a `?` after the *name*
+
+let c: Config = Config(3);                     // the label is optional: null
+print(tostring(c == Config(3, null)));         // true: omission *is* null
+if (c.label != null) { print(c.label); }       // narrowed, like any other `T?`
+```
+
+Eight things that used to be impossible are not any more: `s[i]` indexes a string,
+`xs[i]` reads and writes one element of an array, `append(xs, v)` is the one way to
+make an array longer, `trunc`/`floor`/`ceil`/`round`/`abs`/`min`/`max`/`idiv` are
+built in, functions can be stored and passed as `function` values, forward and
+mutual recursion work, `T?` records that a value may be absent — narrowed by a
+`!= null` test, per branch, which is what makes a struct able to refer to itself —
+and a `field?: T` may be left out of a struct's constructor entirely.
 
 The full grammar is in [`docs/grammar.md`](docs/grammar.md), and
 [`docs/SKILLS.md`](docs/SKILLS.md) is the same language organised for writing
@@ -196,9 +236,10 @@ $ npm run vela -- ast examples/hello.vela
 ## AI assistants
 
 Vela is unusual enough that a model will guess wrong about it — a language with
-no arrays looks like a language where arrays are spelled differently. So the
-repository ships a skill describing the language, and one command installs it
-wherever your assistant looks for instructions:
+fixed-length arrays, no `for ... of`, and no `push` looks like a language where
+those are spelled differently. So the repository ships a skill describing the
+language, and one command installs it wherever your assistant looks for
+instructions:
 
 ```console
 $ vela install-skill --list
@@ -317,7 +358,7 @@ grammar — if it guesses wrong, a blank line ends the entry.
 | `docs/grammar.md` | The full grammar, from lexical structure to static rules. |
 | `docs/SKILLS.md` | The same language as a writing guide: what Vela cannot do, the recipes that replace the missing library, every diagnostic, and a pre-submission checklist. Written to be handed to an AI model. |
 | `docs/images/` | The wordmark and the pipeline diagram, as SVG. |
-| `test/` | 386 tests across the lexer, parser, checker, interpreter, pipeline, CLI, and skill installer. |
+| `test/` | 706 tests across the lexer, parser, checker, interpreter, pipeline, CLI, and skill installer. |
 
 ## Design notes
 
@@ -341,6 +382,15 @@ return on every path, or the checker rejects it. It handles early returns and
 only return is inside a `while` is wrongly rejected. Being wrong in the safe
 direction is the right trade for a first version.
 
+**Narrowing is tracked per binding, and one hole is documented rather than
+closed.** A comparison against `null` records what it proved about a *place* — a
+name, or a chain of fields from one — for the branch it appears in, and writing to
+that place takes it back. The hole: a function call that assigns is not seen, so
+narrowing and then calling something that sets the name to `null` is accepted and
+can fail at runtime. An indexed element is deliberately not narrowed at all, since
+`xs[0]` has no fixed identity for a fact to attach to. Both are in
+`docs/SKILLS.md` section 18, with the reasoning for buying the first.
+
 **The REPL's completeness check is a heuristic.** Unbalanced brackets and
 trailing operators are cheap signals that catch almost every real case. A real
 fix would be a parser that can report "unexpected end of input" distinctly from
@@ -351,20 +401,29 @@ something to bolt on outside it.
 
 Deliberately absent, listed so their absence reads as a decision:
 
-- Arrays and collections. `s[i]` indexes a string and nothing else, so a string
-  is a sequence rather than a container: there is no way to build a list, and
-  `examples/strings.vela` flattens its input into strings and counts instead.
-- User-defined types, generics, and modules.
-- A writable function type. `function` names no signature, so a call through a
-  stored function is unchecked; the alternative would have made a function
-  storable under only one exact signature. See `docs/SKILLS.md` section 18.
+- A collection library. Arrays are homogeneous, fixed in length, and worked on by
+  index: there is no `for ... of`, no `push`, no `map`/`filter`/`reduce`, and no
+  `sort`. `append` returns a new array, so growing one is a reassignment, and
+  `examples/arrays.vela` sorts and searches in place by hand. A list of mixed types
+  has no representation, because `T[]` is one element type.
+- Generics, modules, and unions. A `struct` is the one user-defined type: named,
+  nominal, immutable in shape, and built by a call rather than a literal. There is
+  no inheritance and no method, and `T?` is the only way to say "or absent" — no
+  `Option`, no `T | U`. A field may be optional, but only as a trailing suffix and
+  only as "may be `null`", never as a default value and never named at the call
+  site; an optional *parameter* does not exist.
+- A function type that accepts *several* signatures. `fn(number) -> number` checks
+  a call fully, and the bare `function` holds anything but does not check it;
+  there is no subtyping, so nothing sits between them and no generic stands in
+  for one. See `docs/SKILLS.md` section 18.
 - Bytecode compilation.
 - Ordering comparisons on anything but `number`. `==` and `!=` work on any two
   values of the same type, but `<`, `<=`, `>`, and `>=` are numeric-only, so
   `"a" < "b"` does not compile.
 - `sqrt` and `pow`. The eight numeric built-ins cover rounding and integer
   division, which is the part worth promising exactly; `docs/SKILLS.md` section
-  11 writes the other two out of `trunc`.
+  11 writes the other two out of `trunc`. The nine string built-ins cover case,
+  trimming, search, slicing, repetition, and replacement, all of them total.
 - Code-point iteration. `len` and `s[i]` count UTF-16 code units, so an emoji is
   two indices wide and reading one half gives a broken character.
 
@@ -372,7 +431,7 @@ Deliberately absent, listed so their absence reads as a decision:
 
 ```console
 $ npm run typecheck        # tsc --noEmit
-$ npm test                 # 386 tests
+$ npm test                 # 706 tests
 $ npm run check-examples   # type-check and run every example
 $ npm run build            # emit dist/ with an executable dist/cli.js
 ```

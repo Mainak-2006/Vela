@@ -70,7 +70,7 @@
       "patterns": [
         {
           "name": "storage.type.vela",
-          "match": "\\b(?:let|fn)\\b"
+          "match": "\\b(?:let|const|fn|struct)\\b"
         },
         {
           "name": "keyword.control.vela",
@@ -78,7 +78,7 @@
         },
         {
           "name": "support.function.builtin.vela",
-          "match": "\\bprint\\b"
+          "match": "\\b(?:print|tostring|tonumber|typeOf|len|trunc|floor|ceil|round|abs|min|max|idiv|read|upper|lower|trim|startsWith|endsWith|indexOf|substr|repeat|replace|append)\\b"
         }
       ]
     },
@@ -88,11 +88,19 @@
     },
     "constants": {
       "name": "constant.language.vela",
-      "match": "\\b(?:true|false)\\b"
+      "match": "\\b(?:true|false|null)\\b"
     },
     "operators": {
-      "name": "keyword.operator.vela",
-      "match": "\\+\\+|--|==|!=|<=|>=|&&|\\|\\||[+\\-*/%!<>]=?|="
+      "patterns": [
+        {
+          "name": "keyword.operator.vela",
+          "match": "-&gt;|\\+\\+|--|==|!=|<=|>=|&&|\\|\\||[+\\-*/%!<>]=?|="
+        },
+        {
+          "name": "keyword.operator.nullable.vela",
+          "match": "\\?(?![=?])"
+        }
+      ]
     },
     "punctuation": {
       "patterns": [
